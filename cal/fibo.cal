@@ -1,0 +1,29 @@
+export main;
+
+import atoi, printf;
+
+main(i64 argc, i64 argv) {
+    i64 n;
+    i64 res;
+
+    if argc < 2 {
+        n = call "" atoi(i64[argv + 8]);
+    }
+    else {
+        n = 30;
+    }
+
+    res = call fibo(n);
+    call "vararg" printf("fibo(%ld) => %ld\n", n, res);
+    return 0;
+}
+
+fibo(i64 n) {
+    if n < 2 {
+        return n;
+    }
+    else {
+        return call fibo(n - 1) + call fibo(n - 2);
+    }
+}
+

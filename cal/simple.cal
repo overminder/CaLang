@@ -1,0 +1,23 @@
+register rval "%rax";
+
+i64 gval = 5;
+
+export func;
+func(i64 arg) {
+    gcptr foo;
+    i64 bar;
+
+    call "vararg" foo(1, 2, bar);
+    while (foo < bar) {
+        foo = foo + bar;
+    }
+    return bar + arg + 1;
+}
+
+try_switch(i64 arg) {
+    switch arg [label0, label1, label2];
+label0:
+label1:
+label2:
+}
+

@@ -1,0 +1,82 @@
+/* Comment block */
+// Line Comment
+
+// Scope declaration
+export stg_apply_p;
+
+// Global register variable declaration
+// Those registers will not be allocated by the Register Allocator
+register Hp "%rbx";
+register HpLim "%r12";
+
+// Global variable decl, with default alignment
+i64 someVar = 0;
+
+// A c-string with implicit size
+//i8[] someString = "foobar";
+
+// An array of size 20
+// i64[20] someArray = {;
+
+// Function definition.
+// We are using platform default ABI here (for me, it's SystemV AMD64 ABI)
+stg_apply_p(gcptr func, gcptr arg1) {
+    // Local variable declaration
+    i64 arity;
+
+    // Explicit memory deref. This is just like ((int64_t **) func)[0][0]
+    arity = i64[i64[func + 0] + 0];
+
+    // If statement
+    if (arity == 1) {
+        // Explicit tailcall, with default calling convention
+        call "tail" i64[i64[func] + 8](func, arg1);
+    }
+    else {
+        if (arity < 0 || arity > 3) {
+            // Local jump
+            jump labeldefault;
+        }
+        // Unsafe switch.
+        switch arity [label0, label1, label2, label3];
+label0:
+label1:
+label2:
+label3:
+labeldefault:
+        // Implicit string constant
+        // Undefined symbol can be used directly (Consider fix it?)
+        // Call with vararg calling convention
+        call "vararg" printf("stg_apply_p: Arity %ld not implemented\n.",
+                             arity);
+        call "" exit(1);
+    }
+    // Return using default convention
+    return 1;
+}
+
+stg_mkThunk_p(gcptr func, gcptr arg1) {
+    i64 newThunk;
+
+    Hp = Hp + size;
+    newThunk = Hp;
+    if (Hp > HpLim) {
+        // __FrameDescr__ is an implicit variable that contains information
+        // about frame layout and can be used by the garbage collector
+        // to mark (and maybe move) all the gcptrs.
+        // Note that if we are using the gc support, none the gcptrs
+        // can be allocated in callee-saved registers.
+        // This should be straightforward...
+        // We may also add stack walking functions for the collector
+        // to use.
+        newThunk = call "" stg_collectGarbage(__FrameDescr__, size);
+    }
+    // Symbol address is taken using their name
+    // If we want the content of a symbol address, we need to explicitly
+    // dereference it.
+    i64[newThunk] = stg_Thunk_p_info;
+    i64[newThunk + 8] = func;
+    i64[newThunk + 16] = arg1;
+    return newThunk;
+}
+
