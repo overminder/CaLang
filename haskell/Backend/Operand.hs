@@ -1,6 +1,8 @@
 module Backend.Operand (
+  MachOp(..), reverseCond, isCondOp,
   OpClass(..),
   OpWidth(..), opWidths,
+  StorageType,
   GcFlag(..),
   RegId(..),
   Reg(..),
@@ -8,6 +10,10 @@ module Backend.Operand (
   Addr(..),
   Operand(..),
   CallingConv(..), parseCallingConv,
+
+  -- Commonly used
+  newVReg,
+  newTempLabel,
 
   pprReg,
   pprWidth,
@@ -44,10 +50,11 @@ data Imm
   | TempLabel String Unique
   deriving (Show, Eq, Ord)
 
+-- base + disp + index(r * i)
 data Addr
   = MkAddr {
     baseOfAddr :: Maybe Reg,
-    indexOfAddr :: (Maybe Reg, Maybe Int),
+    indexOfAddr :: Maybe (Reg, Int),
     dispOfAddr :: Maybe Imm
   }
   deriving (Show)
@@ -70,12 +77,23 @@ parseCallingConv s = mapM parse_one (split "/" s)
   where
     parse_one s = Map.lookup s callingConvNames
 
+-- Commonly used
+newVReg :: StorageType -> UniqueM Operand
+newVReg (kls, width, gc) = do
+  i <- mkUnique
+  return . OpReg $ VReg (MkRegId i) kls width gc
+
+newTempLabel :: String -> UniqueM Operand
+newTempLabel s = do
+  i <- mkUnique
+  return . OpImm . TempLabel s $ i
+
 -- PPR
 instance Ppr Operand where
   ppr op = case op of
     OpReg r -> pprReg r
     OpImm i -> pprImm i
-    OpAddr a -> undefined
+    OpAddr a -> pprAddr a
 
 pprReg :: Reg -> Doc
 pprReg = text . getRegName
@@ -85,6 +103,19 @@ pprImm i = case i of
   IntVal iVal -> integer iVal
   NamedLabel s -> text s
   TempLabel s t -> text $ ".L" ++ s ++ show t
+
+pprAddr :: Addr -> Doc
+pprAddr (MkAddr base index disp) = disp_str <> parens (base_str <> index_str)
+  where
+    base_str = case base of
+      Just r -> pprReg r
+      _ -> empty
+    index_str = case index of
+      Just (r, i) -> comma <> pprReg r <> comma <> int i
+      _ -> empty
+    disp_str = case disp of
+      Just i -> pprImm i
+      _ -> empty
 
 pprWidth w = case w of
   W8  -> int 8

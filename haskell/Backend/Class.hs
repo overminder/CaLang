@@ -1,9 +1,11 @@
 module Backend.Class (
   Register(..),
+  StorageType,
   OpClass(..),
   OpWidth(..), opWidths, intToWidth,
   GcFlag(..),
   RegId(..),
+  MachOp(..), reverseCond, isCondOp,
 ) where
 
 class Register r where
@@ -24,6 +26,8 @@ data OpWidth
   | W64
   deriving (Show, Eq, Ord)
 
+type StorageType = (OpClass, OpWidth, GcFlag)
+
 opWidths = [W8, W16, W32, W64]
 intToWidth i = case i of
   8  -> W8
@@ -39,4 +43,36 @@ newtype GcFlag
 newtype RegId
   = MkRegId { getRegId :: Int }
   deriving (Show, Eq, Ord)
+
+data MachOp
+  -- Arith
+  = AAdd | ASub | AMul | ADiv | AMod | ANeg -- <- unary
+  -- Rel
+  | RLt | RLe | RGt | RGe | REq | RNe
+  -- Logic
+  | LAnd | LOr | LNot -- <- unary
+  -- Bitwise
+  | BAnd | BOr | BXor | BShr | BShl | BNot -- <- unary
+  -- Memory
+  | MRef StorageType
+  deriving (Show, Eq, Ord)
+
+reverseCond :: MachOp -> MachOp
+reverseCond op = case op of
+  RLt -> RGe
+  RLe -> RGt
+  REq -> RNe
+  RNe -> REq
+  RGt -> RLe
+  RGe -> RLt
+
+isCondOp :: MachOp -> Bool
+isCondOp op = case op of
+  RLt -> True
+  RLe -> True
+  REq -> True
+  RNe -> True
+  RGt -> True
+  RGe -> True
+  _ -> False
 

@@ -17,7 +17,8 @@ import qualified Data.Map as Map
 import Data.Traversable
 
 import Frontend.AST
-import Backend.Operand
+import Backend.Operand hiding (newVReg, newTempLabel)
+import qualified Backend.Operand as Op
 import Utils.Unique (Unique)
 import qualified Utils.Unique as Unique
 
@@ -116,7 +117,7 @@ renameFunc (Func name args body) = do
   runFuncM $ do
     -- 1st pass
     args' <- forM args $ \(ty, name) -> do
-      op <- newVReg ty
+      op <- lift $ newVReg ty
       addLocal name op
       return (ty, op)
     scanStmt body
@@ -168,24 +169,18 @@ mkNameResolver = do
   return f
 
 -- width -> vreg
-newVReg :: StorageType -> FuncM Operand
-newVReg (kls, width, gc) = do
-  i <- lift mkUnique
-  return . OpReg $ VReg (MkRegId i) kls width gc
+newVReg ty = lift $ Op.newVReg ty
 
-newTmpLabel :: String -> FuncM Operand
-newTmpLabel s = do
-  i <- lift mkUnique
-  return . OpImm . TempLabel s $ i
+newTempLabel name = lift $ Op.newTempLabel name
 
 -- First pass on function: scan local label defs and var defs.
 scanStmt :: Stmt Name -> FuncM ()
 scanStmt s = case s of
   SVarDecl (ty, name) -> do
-    op <- newVReg ty
+    op <- lift $ newVReg ty
     addLocal name op
   SLabel name -> do
-    label <- newTmpLabel name
+    label <- lift $ newTempLabel name
     addLocal name label
   SBlock xs -> do
     mapM_ scanStmt xs

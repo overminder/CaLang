@@ -1,6 +1,6 @@
 module Frontend.Simplify (
   runSimplifyM,
-  simplify
+  simplify,
 ) where
 -- This is a pass after renaming. It does the following things:
 --  * Extract string literals in functions and daats and replace them
@@ -9,6 +9,8 @@ module Frontend.Simplify (
 --  * Lift nested call so that each child of a call cannot be a call
 --  * Desugar switch
 --  * Remove literal nodes in functions
+--  * Desugar if and while so that functions only contain simple branches:
+--    if (e) { goto L1; }
 --  * Remove type declaration statements in functions
 
 import Control.Monad.State
@@ -20,7 +22,8 @@ import Utils.Unique (Unique)
 import qualified Utils.Unique as Unique
 
 import Frontend.AST
-import Backend.Operand
+import Backend.Operand hiding (newVReg, newTempLabel)
+import qualified Backend.Operand as Op
 import Backend.Class
 
 type CompilerM = Unique.UniqueM
@@ -54,16 +57,24 @@ simplify datas funcs = do
     mk_datas m = Map.foldrWithKey comb_str [] m
     comb_str str op = (:) (LiteralData (i64, op) (LStr str))
 
--- pipeline
+runPipeline ms init = case ms of
+  x:xs -> do
+    init' <- x init
+    runPipeline xs init'
+  [] -> return init
+
+-- All of the simplifications
 simplifyFunc :: Func Operand -> SimplifyM (Func Operand)
 simplifyFunc (Func name args body) = do
-  body_ext_str <- extractStr body
-  body_ext_jmp <- extractJumpTable body_ext_str
-  body_no_lop <- liftLogicalOp body_ext_jmp
-  body_no_ncall <- liftNestedCall body_no_lop
-  let body_no_lit = cleanLiteral body_no_ncall
-  let body_cleaned = cleanDeclStmt body_no_lit
-  return $ Func name args body_cleaned
+  body' <- runPipeline [extractStr,
+                        extractJumpTable,
+                        liftLogicalOp,
+                        liftNestedCall,
+                        desugarControlStmt,
+                        return . cleanLiteral,
+                        return . cleanDeclStmt]
+                       body
+  return $ Func name args body'
 
 simplifyData :: Data Operand -> SimplifyM (Data Operand)
 simplifyData (LiteralData (ty, name) lit) = do
@@ -132,47 +143,53 @@ extractJumpTable s = case s of
     }
     mk_jump_table labels = do
       i <- mkUnique
-      let name = OpImm (TempLabel "str" i)
+      let name = OpImm (TempLabel "jumpTable" i)
           table = LiteralData (i64, name) (LArr (map LSym labels))
       add_jump_table table
       return name
 
--- lift || && ! to if
+-- lift || && ! < <= > >= == != to if
 -- XXX: Code generated is far from optimal, consider some opt?
 liftLogicalOp :: Stmt Operand -> SimplifyM (Stmt Operand)
 liftLogicalOp s = liftExprM lift_expr s
   where
-    lift_expr e = case e of
-      EBinary bop e1 e2 -> do
-        (e1', s1s) <- lift_expr e1
-        (e2', s2s) <- lift_expr e2
-        case bop of 
-          LAnd -> do
-            tmp <- liftM EVar (newVReg i64)
-            let check_e1 = SIf e1' check_e2 (mk_set_stmt tmp 0)
-                check_e2 = SIf e2' (mk_set_stmt tmp 0) (mk_set_stmt tmp 1)
-            return (tmp, s1s ++ s2s ++ [check_e1])
-          LOr -> do
-            tmp <- liftM EVar (newVReg i64)
-            let check_e1 = SIf e1' (mk_set_stmt tmp 1) check_e2
-                check_e2 = SIf e2' (mk_set_stmt tmp 1) (mk_set_stmt tmp 0)
-            return (tmp, s1s ++ s2s ++ [check_e1])
-          _ -> do
-            return (EBinary bop e1' e2', s1s ++ s2s)
-      EUnary uop e -> do
-        (e', ss) <- lift_expr e
-        case uop of 
-          LNot -> do
-            tmp <- liftM EVar (newVReg i64)
-            let check_e = SIf e' (mk_set_stmt tmp 0) (mk_set_stmt tmp 1)
-            return (tmp, ss ++ [check_e])
-          _ -> do
-            return (EUnary uop e', ss)
-      ECall conv func args -> do
-        (func', sfs) <- lift_expr func
-        (args', sas) <- liftM unzip (mapM lift_expr args)
-        return (ECall conv func' args', sfs ++ concat sas)
-      _ -> return (e, [])
+    lift_expr :: Expr Operand -> SimplifyM (Expr Operand, [Stmt Operand])
+    lift_expr e = do
+      tmp <- liftM EVar (newVReg i64)
+      let set_tmp_zero = mk_set_stmt tmp 0
+          set_tmp_one  = mk_set_stmt tmp 1
+      case e of
+        EBinary bop e1 e2 -> do
+          (e1', s1s) <- lift_expr e1
+          (e2', s2s) <- lift_expr e2
+          case bop of 
+            LAnd -> do
+              let check_e1 = SIf e1' check_e2 set_tmp_zero
+                  check_e2 = SIf e2' set_tmp_zero set_tmp_one
+              return (tmp, s1s ++ s2s ++ [check_e1])
+            LOr -> do
+              let check_e1 = SIf e1' set_tmp_one check_e2
+                  check_e2 = SIf e2' set_tmp_one set_tmp_zero
+              return (tmp, s1s ++ s2s ++ [check_e1])
+            _ -> if isCondOp bop
+                   then return (tmp, s1s ++ s2s ++ [SIf (EBinary bop e1' e2')
+                                                        set_tmp_one
+                                                        set_tmp_zero])
+                   else return (EBinary bop e1' e2', s1s ++ s2s)
+        EUnary uop e -> do
+          (e', ss) <- lift_expr e
+          case uop of 
+            LNot -> do
+              tmp <- liftM EVar (newVReg i64)
+              let check_e = SIf e' set_tmp_zero set_tmp_one
+              return (tmp, ss ++ [check_e])
+            _ -> do
+              return (EUnary uop e', ss)
+        ECall conv func args -> do
+          (func', sfs) <- lift_expr func
+          (args', sas) <- liftM unzip (mapM lift_expr args)
+          return (ECall conv func' args', sfs ++ concat sas)
+        _ -> return (e, [])
     mk_set_stmt op ival = SAssign op (ELit (LInt ival))
 
 liftNestedCall :: Stmt Operand -> SimplifyM (Stmt Operand)
@@ -202,6 +219,39 @@ liftNestedCall s = liftExprM lift_expr s
         return (tmp, sfs ++ concat sas ++
                      [SAssign tmp (ECall conv func' args')])
       _ -> lift_expr e
+
+desugarControlStmt :: Stmt Operand -> SimplifyM (Stmt Operand)
+desugarControlStmt s = do
+  xs <- desugar s
+  return $ if length xs == 1 then head xs else SBlock xs
+  where
+    flatten s = case s of
+      SBlock xs -> xs
+      _ -> [s]
+    desugar s = case s of
+      SBlock xs -> liftM concat (mapM desugar xs)
+      SIf e s1 s2 -> do
+        s1' <- desugar s1
+        s2' <- desugar s2
+        lbl_false <- newTempLabel "ifFalse"
+        lbl_end <- newTempLabel "ifEnd"
+        let ifStmt = SIf (EUnary LNot e)
+                         (SJump (EVar lbl_false))
+                         (SBlock [])
+        return $ [ifStmt] ++ s1' ++
+                 [SJump (EVar lbl_end), SLabel lbl_false] ++ s2' ++
+                 [SLabel lbl_end]
+      SWhile e s -> do
+        s' <- desugar s
+        lbl_loop <- newTempLabel "whileLoop"
+        lbl_check <- newTempLabel "whileCheck"
+        lbl_end <- newTempLabel "whileEnd"
+        return $ [SIf e (SJump (EVar lbl_loop)) (SJump (EVar lbl_end)),
+                  SLabel lbl_loop] ++ s' ++
+                 [SLabel lbl_check,
+                  SIf e (SJump (EVar lbl_loop)) (SBlock []),
+                  SLabel lbl_end]
+      _ -> return [s]
 
 -- clean VarDecl
 cleanDeclStmt :: Stmt Operand -> Stmt Operand
@@ -243,11 +293,7 @@ cleanLiteral = traverseExpr clean_lit
         mk_int = EVar . OpImm . IntVal
         mk_flo = EVar . OpImm . FloatVal
 
--- width -> vreg
--- Consider put this in one file?
-newVReg :: StorageType -> SimplifyM Operand
-newVReg (kls, width, gc) = do
-  i <- mkUnique
-  return . OpReg $ VReg (MkRegId i) kls width gc
+newVReg ty = lift $ Op.newVReg ty
 
+newTempLabel name = lift $ Op.newTempLabel name
 

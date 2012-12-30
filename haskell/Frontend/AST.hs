@@ -3,7 +3,7 @@
 module Frontend.AST (
   Name, Binding, StorageType,
   Program, ToplevelDef(..), Func(..), Data(..), Scope(..),
-  Stmt(..), Expr(..), Lit(..), BinaryOp(..), UnaryOp(..), isLVal,
+  Stmt(..), Expr(..), Lit(..), isLVal,
   gcptr, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, storageTypes,
 
   -- Generic (?) traverse
@@ -68,8 +68,8 @@ data Stmt a
 data Expr a
   = ELit (Lit a) -- A source language literal
   | EVar a -- A variable, whose information is described in tyVar a
-  | EBinary BinaryOp (Expr a) (Expr a) -- arith/rel/bool
-  | EUnary UnaryOp (Expr a) -- not/neg
+  | EBinary MachOp (Expr a) (Expr a) -- arith/rel/bool
+  | EUnary MachOp (Expr a) -- not/neg
   | ECall [CallingConv] (Expr a) [Expr a] -- func [args..]
   deriving (Show, Functor)
 
@@ -82,31 +82,13 @@ data Lit a
   | LArr [Lit a] -- Currently only integral types are supported (int, flo, sym)
   deriving (Show, Eq, Ord, Functor)
 
-data BinaryOp
-  -- Arith
-  = AAdd | ASub | AMul | ADiv | AMod
-  -- Rel
-  | RLt | RLe | RGt | RGe | REq | RNe
-  -- Logic
-  | LAnd | LOr
-  -- Bitwise
-  | BAnd | BOr | BXor | BShr | BShl
-  deriving (Show, Eq, Ord)
-
-binaryOpNames :: Map.Map BinaryOp String
+binaryOpNames :: Map.Map MachOp String
 binaryOpNames = Map.fromList [
   (AAdd, "+"), (ASub, "-"), (AMul, "*"), (ADiv, "/"), (AMod, "%"),
   (RLt, "<"), (RLe, "<="), (RGt, ">"), (RGe, ">="), (REq, "=="), (RNe, "!="),
   (LAnd, "&&"), (LOr, "||"),
   (BAnd, "&"), (BOr, "|"), (BXor, "^"), (BShr, ">>"), (BShl, "<<")
   ]
-
-data UnaryOp
-  = ANeg -- Arith neg
-  | LNot -- Logical not
-  | BNot -- Bitwise not
-  | MRef StorageType -- Mem
-  deriving (Show, Eq, Ord)
 
 data Data a
   = LiteralData (Binding a) (Lit a)
@@ -126,8 +108,6 @@ isLVal e = case e of
   EVar _ -> True
   EUnary (MRef _) _ -> True
   _ -> False
-
-type StorageType = (OpClass, OpWidth, GcFlag)
 
 gcptr :: StorageType
 gcptr = (SignedOp, W64, MkGcFlag True)
@@ -192,7 +172,7 @@ pprStmt s = case s of
     Nothing -> empty) <> semi
   SJump e -> text "jump" <+> pprExpr e <> semi
   SExpr e -> pprExpr e <> semi
-  SLabel name -> ppr name <> semi
+  SLabel name -> ppr name <> colon
   SSwitch e branches ->
     text "switch" <+> pprExpr e <+>
     brackets (hcat (punctuate comma (map ppr branches))) <> semi
@@ -203,9 +183,9 @@ pprExpr e = case e of
   EVar name -> ppr name
   EBinary op e1 e2 -> pprExpr e1 <+> pprBinaryOp op <+> pprExpr e2
   EUnary op e -> case op of
-    ANeg -> char '-' <> pprExpr e
-    LNot -> char '!' <> pprExpr e
-    BNot -> char '~' <> pprExpr e
+    ANeg -> char '-' <> parens (pprExpr e)
+    LNot -> char '!' <> parens (pprExpr e)
+    BNot -> char '~' <> parens (pprExpr e)
     MRef ty -> pprStorageType ty <> brackets (pprExpr e)
   ECall conv func args ->
     text "call" <+>
