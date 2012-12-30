@@ -9,8 +9,8 @@ import Utils.Unique
 
 compileProg rdrProg = do
   (rnData, rnFunc, exports, clobberedRegs) <- runRenameM (rename rdrProg)
-  (moreData, simFunc) <- runSimplifyM (simplify rnFunc)
-  return (rnData ++ moreData, simFunc)
+  (simData, simFunc) <- runSimplifyM (simplify rnData rnFunc)
+  return (simData, simFunc)
 
 main = do
   rdrProg <- liftM readProgram getContents

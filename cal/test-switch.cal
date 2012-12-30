@@ -1,0 +1,14 @@
+
+test_switch(i64 a) {
+    switch a [case0, case1, case2, case3, case4];
+case0:
+    return 0;
+case1:
+    return 1;
+case2:
+    return 2;
+case3:
+    return 3;
+case4:
+    return 4;
+}

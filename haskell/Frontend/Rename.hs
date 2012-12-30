@@ -3,6 +3,10 @@ module Frontend.Rename (
   rename,
 ) where
 
+-- Resolves names and transforms (Program Name) into (Program Operand).
+-- Assigns VReg to each local variables.
+-- Will also check undefined symbols.
+
 import Control.Applicative
 import Prelude hiding (mapM)
 import Control.Monad.State hiding (forM, mapM)
@@ -42,7 +46,7 @@ runRenameM m = evalStateT m empty_state
 rename :: Program Name -> RenameM ([Data Operand], [Func Operand],
                                    [String], [Operand])
 rename xs = do
-  -- Two phases
+  -- Two passes
   mapM_ scanToplevel xs
   tops <- liftM join (mapM renameToplevel xs)
 
@@ -79,7 +83,7 @@ newGlobalReg name reg = modify $ \st -> st {
 resolveGlobal :: String -> RenameState -> Maybe Operand
 resolveGlobal name st = Map.lookup name (rnGlobals st)
 
--- first pass: scan global defs
+-- First pass on toplevel: scan global defs
 scanToplevel :: ToplevelDef Name -> RenameM ()
 scanToplevel t = case t of
   FuncDef (Func name _ _) -> newGlobal u32 name
@@ -103,18 +107,20 @@ renameToplevel t = case t of
   ScopeDef _ ->
     -- Scope defs are stripped since they are no longer needed:
     -- Exports and global regs are accumulated
-    -- Imports are just used for link checking
+    -- Imports are just used for type checking
     return []
 
 renameFunc :: Func Name -> RenameM (Func Operand)
 renameFunc (Func name args body) = do
   (Just name') <- liftM (resolveGlobal name) get
   runFuncM $ do
+    -- 1st pass
     args' <- forM args $ \(ty, name) -> do
       op <- newVReg ty
       addLocal name op
       return (ty, op)
     scanStmt body
+    -- 2nd pass
     nameResolver <- mkNameResolver
     let body' = fmap nameResolver body
     return $ Func name' args' body'
@@ -172,7 +178,7 @@ newTmpLabel s = do
   i <- lift mkUnique
   return . OpImm . TempLabel s $ i
 
--- first pass: scan local label defs and var defs.
+-- First pass on function: scan local label defs and var defs.
 scanStmt :: Stmt Name -> FuncM ()
 scanStmt s = case s of
   SVarDecl (ty, name) -> do

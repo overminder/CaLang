@@ -39,6 +39,7 @@ instance Register Reg where
 
 data Imm
   = IntVal Integer
+  | FloatVal Double
   | NamedLabel String
   | TempLabel String Unique
   deriving (Show, Eq, Ord)
@@ -98,4 +99,5 @@ pprCallingConvs cs = if null cs
     ppr_calling_conv c = case c of
       TailCall -> text "tail"
       Vararg -> text "vararg"
+
 

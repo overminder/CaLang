@@ -3,13 +3,17 @@ module Frontend.Simplify (
   simplify
 ) where
 -- This is a pass after renaming. It does the following things:
---  * Extract string literals and replace them with labels
+--  * Extract string literals in functions and daats and replace them
+--    with labels
 --  * Lift logical expressions out and turn them into If statements
 --  * Lift nested call so that each child of a call cannot be a call
+--  * Desugar switch
+--  * Remove literal nodes in functions
 --  * Remove type declaration statements in functions
 
 import Control.Monad.State
 import Control.Monad.Trans
+import Data.Char (ord)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Utils.Unique (Unique)
@@ -27,63 +31,114 @@ mkUnique = lift Unique.mkUnique
 
 data SimState
   = MkState {
-    extractedString :: Map.Map String Operand
+    extractedString :: Map.Map String Operand,
+    jumpTable :: [Data Operand]
   }
 
 runSimplifyM m = evalStateT m empty_state
   where
     empty_state = MkState {
-      extractedString = Map.empty
+      extractedString = Map.empty,
+      jumpTable = []
     }
 
-simplify :: [Func Operand] -> SimplifyM ([Data Operand], [Func Operand])
-simplify funcs = do
+simplify :: [Data Operand] -> [Func Operand] ->
+            SimplifyM ([Data Operand], [Func Operand])
+simplify datas funcs = do
   funcs' <- mapM simplifyFunc funcs
-  datas <- liftM (mk_datas . extractedString) get
-  return (datas, funcs')
+  datas' <- mapM simplifyData datas
+  more_str <- liftM (mk_datas . extractedString) get
+  jmp_tab <- liftM jumpTable get
+  return (datas' ++ more_str ++ jmp_tab, funcs')
   where
-    mk_datas m = Map.foldrWithKey combine [] m
-    combine str op = (:) (LiteralData (i64, op) (LStr str))
+    mk_datas m = Map.foldrWithKey comb_str [] m
+    comb_str str op = (:) (LiteralData (i64, op) (LStr str))
 
+-- pipeline
 simplifyFunc :: Func Operand -> SimplifyM (Func Operand)
 simplifyFunc (Func name args body) = do
-  body_ext <- traverseExprM extractStr body
-  body_no_lop <- liftLogicalOp body_ext
-  body_non_call <- liftNestedCall body_no_lop
-  let body_cleaned = cleanDeclStmt body_non_call
+  body_ext_str <- extractStr body
+  body_ext_jmp <- extractJumpTable body_ext_str
+  body_no_lop <- liftLogicalOp body_ext_jmp
+  body_no_ncall <- liftNestedCall body_no_lop
+  let body_no_lit = cleanLiteral body_no_ncall
+  let body_cleaned = cleanDeclStmt body_no_lit
   return $ Func name args body_cleaned
 
-extractStr :: Expr Operand -> SimplifyM (Expr Operand)
-extractStr e = case e of
-  ELit (LStr s) -> do
-    label <- intern_str s
-    return $ EVar label
-  EBinary bop e1 e2 -> do
-    e1' <- extract_str e1
-    e2' <- extract_str e2
-    return $ EBinary bop e1' e2'
-  EUnary uop e -> do
-    liftM (EUnary uop) (extract_str e)
-  ECall conv func args -> do
-    func' <- extract_str func
-    args' <- mapM extract_str args
-    return $ ECall conv func' args'
-  _ -> return e
+simplifyData :: Data Operand -> SimplifyM (Data Operand)
+simplifyData (LiteralData (ty, name) lit) = do
+  lit' <- case lit of
+    LArr xs -> liftM LArr (mapM extract_str xs)
+    _ -> return lit
+  return (LiteralData (ty, name) lit')
   where
-    extract_str = extractStr
-    intern_str s = do
-      strs <- liftM extractedString get
-      case Map.lookup s strs of
-        Nothing -> do
-          i <- mkUnique
-          let new_label = OpImm (TempLabel "str" i)
-          modify $ \st -> st {
-            extractedString = Map.insert s new_label strs
-          }
-          return new_label
-        Just old_label -> return old_label
+    extract_str lit = case lit of
+      LStr s -> liftM LSym (internString s)
+      _ -> return lit
+
+extractStr :: Stmt Operand -> SimplifyM (Stmt Operand)
+extractStr = traverseExprM extract_str'
+  where
+    extract_str' e = case e of
+      ELit (LStr s) -> do
+        label <- internString s
+        return $ EVar label
+      EBinary bop e1 e2 -> do
+        e1' <- extract_str' e1
+        e2' <- extract_str' e2
+        return $ EBinary bop e1' e2'
+      EUnary uop e -> do
+        liftM (EUnary uop) (extract_str' e)
+      ECall conv func args -> do
+        func' <- extract_str' func
+        args' <- mapM extract_str' args
+        return $ ECall conv func' args'
+      _ -> return e
+
+internString :: String -> SimplifyM Operand
+internString s = do
+  strs <- liftM extractedString get
+  case Map.lookup s strs of
+    Nothing -> do
+      i <- mkUnique
+      let new_label = OpImm (TempLabel "str" i)
+      modify $ \st -> st {
+        extractedString = Map.insert s new_label strs
+      }
+      return new_label
+    Just old_label -> return old_label
+
+extractJumpTable :: Stmt Operand -> SimplifyM (Stmt Operand)
+extractJumpTable s = case s of
+  SSwitch e labels -> do
+    table_name <- mk_jump_table labels
+    return $ SJump (EUnary (MRef i64)
+                           (EBinary AAdd
+                                    (EVar table_name)
+                                    (EBinary BShl e (ELit (LInt 3)))))
+  SIf e s1 s2 -> do
+    s1' <- transf s1
+    s2' <- transf s2
+    return $ SIf e s1' s2'
+  SWhile e s -> do
+    s' <- transf s
+    return $ SWhile e s'
+  SBlock xs -> liftM SBlock (mapM transf xs)
+  _ -> return s
+  where
+    transf = extractJumpTable
+    add_jump_table table = modify $ \st -> st {
+      jumpTable = table:jumpTable st
+    }
+    mk_jump_table labels = do
+      i <- mkUnique
+      let name = OpImm (TempLabel "str" i)
+          table = LiteralData (i64, name) (LArr (map LSym labels))
+      add_jump_table table
+      return name
 
 -- lift || && ! to if
+-- XXX: Code generated is far from optimal, consider some opt?
 liftLogicalOp :: Stmt Operand -> SimplifyM (Stmt Operand)
 liftLogicalOp s = liftExprM lift_expr s
   where
@@ -161,6 +216,32 @@ cleanDeclStmt stmt = case flatten_clean stmt of
       SWhile e s -> [SWhile e (clean s)]
       SBlock xs -> [SBlock (concatMap flatten_clean xs)]
       _ -> [s]
+
+-- clean ELit
+cleanLiteral :: Stmt Operand -> Stmt Operand
+cleanLiteral = traverseExpr clean_lit
+  where
+    clean_lit :: Expr Operand -> Expr Operand
+    clean_lit exp = case exp of
+      ELit lit -> case lit of
+        -- Consider move this to AST.hs?
+        LInt i -> mk_int i
+        LChr c -> mk_int . fromIntegral . ord $ c
+        LFlo d -> mk_flo d
+        LSym a -> EVar a
+        _ -> error $ "Simplify.cleanLiteral: uncleaned literal: " ++ show lit
+      EBinary bop e1 e2 -> let e1' = clean_lit e1
+                               e2' = clean_lit e2
+                            in EBinary bop e1' e2'
+      EUnary uop e -> let e' = clean_lit e
+                       in EUnary uop e'
+      ECall conv func args -> let func' = clean_lit func
+                                  args' = map clean_lit args
+                               in ECall conv func' args'
+      _ -> exp
+      where
+        mk_int = EVar . OpImm . IntVal
+        mk_flo = EVar . OpImm . FloatVal
 
 -- width -> vreg
 -- Consider put this in one file?

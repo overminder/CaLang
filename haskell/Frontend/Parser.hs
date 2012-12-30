@@ -52,6 +52,7 @@ braces = T.braces lexer
 brackets = T.brackets lexer
 numLit = T.naturalOrFloat lexer
 strLit = T.stringLiteral lexer
+chrLit = T.charLiteral lexer
 semi = T.semi lexer
 comma = T.comma lexer
 ws = T.whiteSpace lexer
@@ -233,15 +234,24 @@ pArgs = parens $ sepBy pExpr comma
 
 pTerm = parens pExpr
     <|> pMemDeref
-    <|> liftM ELit pLit
     <|> liftM EVar ident
+    <|> liftM ELit pLit
 
-pLit = liftM mk_num numLit
-   <|> liftM LStr strLit
-   where
-     mk_num num = case num of
-       Left i -> LInt i
-       Right d -> LFlo d
+pNumLit = liftM mk_num numLit
+  where
+    mk_num num = case num of
+      Left i -> LInt i
+      Right d -> LFlo d
+
+pChrLit = liftM LChr chrLit
+pStrLit = liftM LStr strLit
+pArrLit = liftM LArr (braces (sepBy pLit comma))
+  where
+    p_integral_lit = pNumLit <|> pChrLit <|> pStrLit <|> pSymLit
+
+pSymLit = liftM LSym ident
+
+pLit = pNumLit <|> pChrLit <|> pStrLit <|> pArrLit <|> pSymLit
 
 pMemDeref = do
   mcls <- pStorageType

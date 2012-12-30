@@ -8,6 +8,7 @@ module Frontend.AST (
 
   -- Generic (?) traverse
   traverseExprM,
+  traverseExpr,
   liftExprM,
 
   -- Pretty printing
@@ -17,6 +18,7 @@ module Frontend.AST (
 ) where
 
 import Control.Monad hiding (mapM)
+import Control.Monad.Identity hiding (mapM)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Traversable
@@ -64,18 +66,21 @@ data Stmt a
   deriving (Show, Functor)
 
 data Expr a
-  = ELit Lit -- A source language literal
+  = ELit (Lit a) -- A source language literal
   | EVar a -- A variable, whose information is described in tyVar a
   | EBinary BinaryOp (Expr a) (Expr a) -- arith/rel/bool
   | EUnary UnaryOp (Expr a) -- not/neg
   | ECall [CallingConv] (Expr a) [Expr a] -- func [args..]
   deriving (Show, Functor)
 
-data Lit
+data Lit a
   = LInt Integer
+  | LChr Char
   | LStr String
   | LFlo Double
-  deriving (Show, Eq, Ord)
+  | LSym a -- Reference a object symbol
+  | LArr [Lit a] -- Currently only integral types are supported (int, flo, sym)
+  deriving (Show, Eq, Ord, Functor)
 
 data BinaryOp
   -- Arith
@@ -104,7 +109,7 @@ data UnaryOp
   deriving (Show, Eq, Ord)
 
 data Data a
-  = LiteralData (Binding a) Lit
+  = LiteralData (Binding a) (Lit a)
   deriving (Show, Functor)
 
 data Scope
@@ -210,8 +215,11 @@ pprExpr e = case e of
 
 pprLit lit = case lit of
   LInt i -> integer i
+  LChr c -> text (show c)
   LStr s -> text (show s)
   LFlo d -> double d
+  LSym s -> ppr s
+  LArr xs -> braces (hcat (punctuate comma (map pprLit xs)))
 
 pprBinaryOp op = text (binaryOpNames Map.! op)
 
@@ -240,6 +248,9 @@ traverseExprM f s = case s of
   SExpr e -> liftM SExpr (f e)
   SLabel _ -> return s
   SSwitch e xs -> liftM (flip SSwitch xs) (f e)
+
+traverseExpr :: (Expr a -> Expr a) -> Stmt a -> Stmt a
+traverseExpr f s = runIdentity (traverseExprM (return . f) s)
 
 liftExprM :: Monad m => (Expr a -> m (Expr a, [Stmt a])) ->
                         Stmt a -> m (Stmt a)
