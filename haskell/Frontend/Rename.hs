@@ -161,7 +161,6 @@ mkNameResolver = do
                                   globalDctRepr
   return f
 
-
 -- width -> vreg
 newVReg :: StorageType -> FuncM Operand
 newVReg (kls, width, gc) = do

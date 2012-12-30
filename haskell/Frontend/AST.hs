@@ -8,6 +8,7 @@ module Frontend.AST (
 
   -- Generic (?) traverse
   traverseExprM,
+  liftExprM,
 
   -- Pretty printing
   pprProgram,
@@ -239,4 +240,43 @@ traverseExprM f s = case s of
   SExpr e -> liftM SExpr (f e)
   SLabel _ -> return s
   SSwitch e xs -> liftM (flip SSwitch xs) (f e)
+
+liftExprM :: Monad m => (Expr a -> m (Expr a, [Stmt a])) ->
+                        Stmt a -> m (Stmt a)
+liftExprM f s = do
+  xs <- flatten_lift s
+  return $ if length xs == 1 then head xs else SBlock xs
+  where
+  flatten_lift s = case s of
+    SAssign e1 e2 -> do
+      (e1', ss1) <- f e1
+      (e2', ss2) <- f e2
+      return $ ss1 ++ ss2 ++ [SAssign e1' e2']
+    SVarDecl _ -> return [s]
+    SIf e s1 s2 -> do
+      (e', ss) <- f e
+      s1' <- liftExprM f s1
+      s2' <- liftExprM f s2
+      return $ ss ++ [SIf e' s1' s2']
+    SWhile e s -> do
+      (e', ss) <- f e
+      s' <- liftExprM f s
+      return $ ss ++ [SWhile e' s']
+    SBlock xs -> do
+      liftM ((:[]) . SBlock . concat) (mapM flatten_lift xs)
+    SReturn mbE -> case mbE of
+      Just e -> do
+        (e', ss) <- f e
+        return $ ss ++ [SReturn (Just e')]
+      Nothing -> return [s]
+    SJump e -> do
+      (e', ss) <- f e
+      return $ ss ++ [SJump e']
+    SExpr e -> do
+      (e', ss) <- f e
+      return $ ss ++ [SExpr e']
+    SLabel _ -> return [s]
+    SSwitch e labels -> do
+      (e', ss) <- f e
+      return $ ss ++ [SSwitch e' labels]
 
