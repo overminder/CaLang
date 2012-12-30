@@ -3,8 +3,14 @@ import Control.Monad
 import Frontend.AST
 import Frontend.Parser
 import Frontend.Rename
+import Frontend.Simplify
 
 import Utils.Unique
+
+compileProg rdrProg = do
+  (rnData, rnFunc, exports, clobberedRegs) <- runRenameM (rename rdrProg)
+  (moreData, simFunc) <- runSimplifyM (simplify rnFunc)
+  return (rnData ++ moreData, simFunc)
 
 main = do
   rdrProg <- liftM readProgram getContents
@@ -12,9 +18,10 @@ main = do
   --putStrLn "********"
   --putStrLn . show . pprProgram $ rdrProg
 
-  let (rnProg, exports, clobberedRegs) =
-        runUniqueM . runRenameM . rename $ rdrProg
-  putStrLn "RnProg:"
-  putStrLn "*******"
-  putStrLn . show . pprProgram $ rnProg
+  let (datas, funcs) = runUniqueM (compileProg rdrProg)
+
+  putStrLn "SimFunc:" >> putStrLn "*******"
+  mapM_ (putStrLn . show . pprFunc) funcs
+  putStrLn "SimData:" >> putStrLn "*******"
+  mapM_ (putStrLn . show . pprData) datas
 

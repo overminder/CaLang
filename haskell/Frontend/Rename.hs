@@ -3,17 +3,16 @@ module Frontend.Rename (
   rename,
 ) where
 
-import Data.Traversable
+import Control.Applicative
 import Prelude hiding (mapM)
 import Control.Monad.State hiding (forM, mapM)
 import Control.Monad.Trans
+import qualified Data.List as List
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Maybe (catMaybes)
+import Data.Traversable
 
 import Frontend.AST
-import Frontend.Parser
-
 import Backend.Operand
 import Utils.Unique (Unique)
 import qualified Utils.Unique as Unique
@@ -31,10 +30,8 @@ type RenameM = StateT RenameState CompilerM
 mkUnique :: RenameM Unique
 mkUnique = lift Unique.mkUnique
 
-runRenameM :: RenameM a -> CompilerM (a, [String], [Operand])
-runRenameM m = do
-  (a, st) <- runStateT m empty_state
-  return (a, rnExports st, rnClobberedRegs st)
+runRenameM :: RenameM a -> CompilerM a
+runRenameM m = evalStateT m empty_state
   where
     empty_state = MkState {
       rnGlobals = Map.empty,
@@ -42,10 +39,24 @@ runRenameM m = do
       rnClobberedRegs = []
     }
 
-rename :: Program Name -> RenameM (Program Operand)
+rename :: Program Name -> RenameM ([Data Operand], [Func Operand],
+                                   [String], [Operand])
 rename xs = do
+  -- Two phases
   mapM_ scanToplevel xs
-  liftM catMaybes (mapM renameToplevel xs)
+  tops <- liftM join (mapM renameToplevel xs)
+
+  let (w_datas, w_funcs) = List.partition is_data tops
+      datas = map unwrap_data w_datas
+      funcs = map unwrap_func w_funcs
+  exports <- liftM rnExports get
+  clobRegs <- liftM rnClobberedRegs get
+  return (datas, funcs, exports, clobRegs)
+  where
+    is_data (DataDef _) = True
+    is_data _ = False
+    unwrap_data (DataDef d) = d
+    unwrap_func (FuncDef f) = f
 
 -- Worker functions
 
@@ -78,22 +89,22 @@ scanToplevel t = case t of
     Import names -> mapM_ (newGlobal i64) names
     GlobalReg name reg -> newGlobalReg name (OpReg reg)
 
-renameToplevel :: ToplevelDef Name -> RenameM (Maybe (ToplevelDef Operand))
+renameToplevel :: ToplevelDef Name -> RenameM [ToplevelDef Operand]
 renameToplevel t = case t of
   FuncDef f@(Func _ _ _) ->
-    liftM (Just . FuncDef) (renameFunc f)
+    liftM (pure . FuncDef) (renameFunc f)
   DataDef _ -> do
     dctLookup <- liftM (flip resolveGlobal) get
     let f s = case dctLookup s of
                 Just v -> v
                 Nothing -> error $ "Rename.renameToplevel: " ++
                                    "unknown global var: " ++ s
-    return . Just $ fmap f t
+    return . pure $ fmap f t
   ScopeDef _ ->
     -- Scope defs are stripped since they are no longer needed:
     -- Exports and global regs are accumulated
     -- Imports are just used for link checking
-    return Nothing
+    return []
 
 renameFunc :: Func Name -> RenameM (Func Operand)
 renameFunc (Func name args body) = do

@@ -6,16 +6,26 @@ module Frontend.AST (
   Stmt(..), Expr(..), Lit(..), BinaryOp(..), UnaryOp(..), isLVal,
   gcptr, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64, storageTypes,
 
+  -- Generic (?) traverse
+  traverseExprM,
+
   -- Pretty printing
   pprProgram,
+  pprFunc,
+  pprData,
 ) where
 
-import Text.PrettyPrint
+import Control.Monad hiding (mapM)
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Traversable
+import Prelude hiding (mapM)
+import Text.PrettyPrint
 
 import Backend.Operand
 import Utils.Class
+
+import Data.List (mapAccumL)
 
 type Program a = [ToplevelDef a]
 type Name = String
@@ -199,8 +209,34 @@ pprExpr e = case e of
 
 pprLit lit = case lit of
   LInt i -> integer i
-  LStr s -> doubleQuotes (zeroWidthText s)
+  LStr s -> text (show s)
   LFlo d -> double d
 
 pprBinaryOp op = text (binaryOpNames Map.! op)
+
+-- Monadic traverse
+traverseExprM :: Monad m => (Expr a -> m (Expr a)) -> Stmt a -> m (Stmt a)
+traverseExprM f s = case s of
+  SAssign e1 e2 -> do
+    e1' <- f e1
+    e2' <- f e2
+    return $ SAssign e1' e2'
+  SVarDecl _ -> return s
+  SIf e s1 s2 -> do
+    e' <- f e
+    s1' <- traverseExprM f s1
+    s2' <- traverseExprM f s2
+    return $ SIf e' s1' s2'
+  SWhile e s -> do
+    e' <- f e
+    s' <- traverseExprM f s
+    return $ SWhile e' s'
+  SBlock xs -> do
+    xs' <- mapM (traverseExprM f) xs
+    return $ SBlock xs'
+  SReturn mbE -> liftM SReturn (mapM f mbE)
+  SJump e -> liftM SJump (f e)
+  SExpr e -> liftM SExpr (f e)
+  SLabel _ -> return s
+  SSwitch e xs -> liftM (flip SSwitch xs) (f e)
 
