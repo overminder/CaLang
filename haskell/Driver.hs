@@ -12,11 +12,13 @@ import Frontend.AST
 import Frontend.Parser
 import Frontend.Rename
 import qualified Frontend.Simplify as FrSim
+import qualified Middleend.Tac.Munch as TacMun
+import Middleend.FlowGraph.Builder
+import qualified Middleend.FlowGraph.Simplify as GrSim
+import Middleend.Tac.Instr
 import Backend.Operand
-import Backend.HOST_ARCH.Munch
-import Backend.HOST_ARCH.Instr
-import Backend.FlowGraph.Builder
-import qualified Backend.FlowGraph.Simplify as GrSim
+--import Backend.HOST_ARCH.Munch
+--import Backend.HOST_ARCH.Instr
 import Utils.Unique
 import Utils.Class
 
@@ -46,7 +48,7 @@ outputPass ((_, fs), (iss, gs)) opts = do
       OutputRawInstr -> do
         forM_ (zip fs iss) $ \(f, is) -> do
           putStrLn $ "# Entry for <" ++ show (pprSignature f) ++ ">"
-          mapM_ (putStrLn . show . pprInstr) is
+          mapM_ (putStrLn . show . ppr) is
 
 runParsePass :: String -> Program String
 runParsePass = readProgram
@@ -60,7 +62,7 @@ runFrontendPass rdrProg = do
   return ((exports, clobRegs, simDatas), simFuncs)
 
 runGraphPass (x, simFuncs) = do
-  insnss <- mapM (runMunchM . munch) simFuncs
+  insnss <- mapM (TacMun.runMunchM . TacMun.munch) simFuncs
   rawGraphs <- mapM (runGraphBuilderM . buildGraph) insnss
   let simGraphs = map GrSim.simplify rawGraphs
   return (insnss, simGraphs)

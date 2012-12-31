@@ -1,6 +1,5 @@
 module Backend.X64.Instr (
   Instr(..),
-  pprInstr,
 ) where
 
 import Text.PrettyPrint
@@ -17,6 +16,9 @@ instance Instruction Instr where
   isFallThroughInstr = x64_isFallThroughInstr
   mkJumpInstr = x64_mkJumpInstr
   renameBranchInstrLabel = x64_renameBranchInstrLabel
+
+instance Ppr Instr where
+  ppr = ppr_instr
 
 x64_isBranchInstr i = case i of
   JMP  _     -> True
@@ -106,10 +108,10 @@ data Instr
 
 type Cond = MachOp
 
-pprInstr :: Instr -> Doc
-pprInstr i = case i of
+ppr_instr :: Instr -> Doc
+ppr_instr i = case i of
   LABEL o -> ppr o <> colon
-  SWITCH o lbls -> pprInstr (JMP o) <+> text "# SWITCH =>" <+>
+  SWITCH o lbls -> ppr_instr (JMP o) <+> text "# SWITCH =>" <+>
                    brackets (hcat (punctuate comma (map pprImm lbls)))
   _ -> text pref <+> (hcat (punctuate comma (map ppr operands)))
   where

@@ -1,4 +1,5 @@
-module Backend.FlowGraph.Simplify (
+{-# LANGUAGE RankNTypes #-}
+module Middleend.FlowGraph.Simplify (
   simplify,
 ) where
 
@@ -8,12 +9,11 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Text.Dot
 
-import Backend.HOST_ARCH.Instr
-import Backend.FlowGraph.Builder
+import Middleend.FlowGraph.Builder
 import Backend.Operand
 import Backend.Class
 
-simplify :: FlowGraph Instr -> FlowGraph Instr
+simplify :: forall a. Instruction a => FlowGraph a -> FlowGraph a
 simplify g = run_pipeline passes
   where
     run_pipeline = foldl (flip ($)) g

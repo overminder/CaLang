@@ -32,7 +32,7 @@ munchStmt s = case s of
     EUnary (MRef ty) e1' -> do
       r1 <- munchExpr e1'
       r2 <- munchExpr e2
-      emit (MOV (mkAddrB r1) r2)
+      emit (MOV (mkAddrB r2) r1)
     _ -> error $ "Munch.munchStmt: not a valid assign stmt: " ++ show s
   SIf e (SJump (EVar (OpImm lbl_true))) s_false -> do
     case e of

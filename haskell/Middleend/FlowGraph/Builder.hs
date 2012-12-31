@@ -1,5 +1,5 @@
 {-# LANGUAGE DeriveFunctor, RankNTypes #-}
-module Backend.FlowGraph.Builder (
+module Middleend.FlowGraph.Builder (
   runGraphBuilderM,
   buildGraph,
   graphToDot,
@@ -14,10 +14,10 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Text.Dot
 
-import Backend.HOST_ARCH.Instr
 import Backend.Operand
 import Backend.Class
 import qualified Utils.Unique as Unique
+import Utils.Class
 
 type BlockId = Unique.Unique
 
@@ -50,11 +50,12 @@ data GraphBuilder a
   deriving (Functor)
 
 type CompilerM = Unique.UniqueM
-type GraphBuilderM = StateT (GraphBuilder Instr) CompilerM
+type GraphBuilderM instr = StateT (GraphBuilder instr) CompilerM
 
+mkUnique :: forall a. GraphBuilderM a Unique.Unique
 mkUnique = lift Unique.mkUnique
 
-runGraphBuilderM :: GraphBuilderM a -> CompilerM (FlowGraph Instr)
+runGraphBuilderM :: GraphBuilderM instr a -> CompilerM (FlowGraph instr)
 runGraphBuilderM m = do
   bdr <- execStateT m empty_builder
   return (gbGraph bdr) { labelMap = gbLabelMap bdr }
@@ -64,7 +65,7 @@ runGraphBuilderM m = do
 
 empty_block = MkBlock (-1) [] Nothing []
 
-buildGraph :: [Instr] -> GraphBuilderM ()
+buildGraph :: forall a. Instruction a => [a] -> GraphBuilderM a ()
 buildGraph is = do
   entry <- newBlock
   modify $ \st -> st {
@@ -76,7 +77,7 @@ buildGraph is = do
 pass :: forall m. Monad m => m ()
 pass = return ()
 
-addInstr :: Instr -> GraphBuilderM ()
+addInstr :: forall a. Instruction a => a -> GraphBuilderM a ()
 addInstr i
   | isBranchInstr i = do
       currBlock <- liftM gbCurrBlock get
@@ -120,7 +121,7 @@ addInstr i
       }
     }
 
-resolveLazyLinks :: GraphBuilderM ()
+resolveLazyLinks :: forall a. GraphBuilderM a ()
 resolveLazyLinks = do
   links <- liftM gbLazyLinks get
   lblMap <- liftM gbLabelMap get
@@ -129,7 +130,7 @@ resolveLazyLinks = do
       Just toId -> linkBlock fromId toId
       Nothing -> error $ "X64.resolveLazyLinks: unknown label: " ++ show lbl
 
-finishCurrBlock :: GraphBuilderM ()
+finishCurrBlock :: forall a. GraphBuilderM a ()
 finishCurrBlock = do
   currBlock <- liftM gbCurrBlock get
   insertBlock currBlock
@@ -137,7 +138,7 @@ finishCurrBlock = do
     gbCurrBlock = empty_block
   }
 
-insertBlock :: BasicBlock Instr -> GraphBuilderM ()
+insertBlock :: forall a. BasicBlock a -> GraphBuilderM a ()
 insertBlock bb = do
   blkMap <- liftM (blockMap . gbGraph) get
   modify $ \st -> st {
@@ -146,7 +147,7 @@ insertBlock bb = do
     }
   }
 
-newBlock :: GraphBuilderM BlockId
+newBlock :: GraphBuilderM a BlockId
 newBlock = do
   i <- mkUnique
   modify $ \st -> st {
@@ -154,12 +155,12 @@ newBlock = do
   }
   return i
 
-addLazyLink :: BlockId -> Imm -> GraphBuilderM ()
+addLazyLink :: forall a. BlockId -> Imm -> GraphBuilderM a ()
 addLazyLink bid lbl = modify $ \st -> st {
   gbLazyLinks = (bid, lbl):gbLazyLinks st
 }
 
-linkBlock :: BlockId -> BlockId -> GraphBuilderM ()
+linkBlock :: forall a. BlockId -> BlockId -> GraphBuilderM a ()
 linkBlock bFrom bTo = do
   g <- liftM gbGraph get
   modify $ \st -> st {
@@ -171,14 +172,14 @@ linkBlock bFrom bTo = do
   where
     insert_set = Map.insertWithKey (const Set.union)
 
-addLabelMapping :: Imm -> BlockId -> GraphBuilderM ()
+addLabelMapping :: forall a. Imm -> BlockId -> GraphBuilderM a ()
 addLabelMapping i b = do
   modify $ \st -> st {
     gbLabelMap = Map.insert i b (gbLabelMap st)
   }
 
 -- Dot file support
-graphToDot :: String -> FlowGraph Instr -> Dot ()
+graphToDot :: Ppr instr => String -> FlowGraph instr -> Dot ()
 graphToDot name (MkGraph eb bm pm sm _) = do
   nodes <- liftM Map.fromList $ forM (Map.toList bm) $ \(bid, bb) -> do
     -- for each block, create a node
@@ -200,8 +201,8 @@ graphToDot name (MkGraph eb bm pm sm _) = do
   where
     mk_block_node (MkBlock bid is (Just ctrl) _)
       = mk_node (unlines (["<Block " ++ show bid ++ ">"] ++
-                          map (show . pprInstr) is ++
-                          ["# Control Instr:", show (pprInstr ctrl)]))
+                          map (show . ppr) is ++
+                          ["# Control Instr:", show (ppr ctrl)]))
     mk_node label = node [("label", label),
                           ("shape", "box"),
                           ("fontsize", "8.00")]
