@@ -177,9 +177,10 @@ pAssignStmt = do
   return $ SAssign lVal rVal
 
 pDeclStmt = do
-  binding <- pTypeBinding
+  ty <- pStorageType
+  names <- ident `sepBy1` comma
   semi
-  return $ SVarDecl binding
+  return $ SVarDecl (zip (repeat ty) names)
 
 pExprStmt = do
   e <- pExpr

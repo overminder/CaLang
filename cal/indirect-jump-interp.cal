@@ -1,7 +1,6 @@
 
 interp(i64 co, i64 sp) {
-    i64 a; i64 b;
-    i64 x; i64 w; i64 v;
+    i64 a, b, x, w, v;
 
 start:
     a = i8[co];

@@ -4,7 +4,7 @@ module Middleend.FlowGraph.Builder (
   buildGraph,
   graphToDot,
   FlowGraph(..),
-  BasicBlock(..),
+  BasicBlock(..), BlockId,
 ) where
 
 import Control.Monad.State
@@ -186,16 +186,18 @@ graphToDot name (MkGraph eb bm pm sm _) = do
     nid <- mk_block_node bb
     return (bid, nid)
   forM_ (Map.toList nodes) $ \(bid, nid) -> do
-    -- for each block, link it to its successors
-    case Map.lookup bid sm of
-      Just succBlocks -> forM_ (Set.toList succBlocks) $ \sbid -> do
-        case Map.lookup sbid nodes of
-          Just snid -> nid .->. snid
+    -- for each block, link it to its predecessors
+    case Map.lookup bid pm of
+      Just predBlocks -> forM_ (Set.toList predBlocks) $ \pbid -> do
+        case Map.lookup pbid nodes of
+          Just pnid -> pnid .->. nid
           Nothing -> do
-            error "graphToDot: no corresponding block"
+            error $ "graphToDot: no corresponding pred block for " ++ show pbid
       Nothing ->
-        -- No successor
-        pass
+        -- No predecessor, assert is entry
+        if bid /= eb
+          then error $ "graphToDot: dangling block: " ++ show bid
+          else pass
   entry <- mk_node $ "Entry for <" ++ name ++ ">"
   entry .->. (nodes Map.! eb)
   where

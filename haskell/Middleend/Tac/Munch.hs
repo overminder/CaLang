@@ -21,7 +21,9 @@ runMunchM :: MunchM a -> CompilerM [Instr]
 runMunchM = execWriterT
 
 munch :: Func Operand -> MunchM ()
-munch (Func name args body) = munchStmt body
+munch (Func name args body) = do
+  emit PROLOG
+  munchStmt body
 
 emit = tell . (:[])
 
@@ -43,17 +45,25 @@ munchStmt s = case s of
         return lbl
       _ -> error $ "X64.Munch: unsupported instr"
     case e of
-      EUnary LNot (EBinary bop e1 e2) -> do
-        r1 <- munchExpr e1
-        r2 <- munchExpr e2
-        emit (JIF (reverseCond bop) (r1, r2) lbl_true lbl_false)
       EUnary LNot e -> do
-        r <- munchExpr e
-        emit (JIF RNe (r, mkInt 0) lbl_true lbl_false)
+        munchStmt (SIf e (SJump (EVar (OpImm lbl_true)))
+                         (SJump (EVar (OpImm lbl_false))))
       EBinary bop e1 e2 -> do
-        r1 <- munchExpr e1
-        r2 <- munchExpr e2
-        emit (JIF bop (r1, r2) lbl_true lbl_false)
+        case bop of
+          LOr -> do
+            lbl_e1_false <- lift (newTempLabel "ifE1False")
+            lbl_end <- lift (newTempLabel "ifOrEnd")
+            munchStmt (SIf e1 (SJump (EVar (OpImm lbl_true)))
+                              (SJump (EVar lbl_e1_false)))
+            emit (LABEL (un_imm lbl_e1_false))
+            munchStmt (SIf e2 (SJump (EVar (OpImm lbl_true)))
+                              (SJump (EVar (OpImm lbl_false))))
+            where
+              un_imm (OpImm i) = i
+          _ -> do
+            r1 <- munchExpr e1
+            r2 <- munchExpr e2
+            emit (JIF bop (r1, r2) lbl_true lbl_false)
       _ -> do
         r <- munchExpr e
         emit (JIF REq (r, mkInt 0) lbl_true lbl_false)
@@ -61,10 +71,18 @@ munchStmt s = case s of
   SBlock xs -> mapM_ munchStmt xs
   SReturn mbE -> do
     mbR <- mapM munchExpr mbE
+    emit EPILOG
     emit $ RET mbR
   SJump dest -> case dest of
     EVar (OpImm lbl) -> emit (JMP lbl)
-  SExpr e -> munchExpr e >> return ()
+  SExpr e -> case e of
+    ECall conv func args -> do
+      func' <- case func of
+                 EVar op@(OpImm (NamedLabel s)) -> return op
+                 _ -> munchExpr func
+      args' <- mapM munchExpr args
+      emit (CALL conv Nothing func' args')
+    _ -> munchExpr e >> return ()
   SLabel (OpImm lbl) -> emit (LABEL lbl)
   SSwitch e lbls (Just tab) -> do
     r <- munchExpr (EUnary (MRef i64)
@@ -100,13 +118,17 @@ munchExpr e = case e of
         emit (UNROP uop tmp r)
     return tmp
   ECall conv func args -> do
-    tmp <- lift $ newVReg i64
     func' <- case func of
                EVar op@(OpImm (NamedLabel s)) -> return op
                _ -> munchExpr func
     args' <- mapM munchExpr args
+    (tmp, res) <- if TailCall `elem` conv || Noret `elem` conv
+                    then return (Nothing, error "tailcall has no value")
+                    else do
+                      tmp <- lift $ newVReg i64
+                      return (Just tmp, tmp)
     emit (CALL conv tmp func' args')
-    return tmp
+    return res
 
 mkInt :: Int -> Operand
 mkInt = OpImm . IntVal . fromIntegral

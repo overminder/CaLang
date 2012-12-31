@@ -24,6 +24,7 @@ import Utils.Class
 
 data OutputOpt
   = OutputNothing
+  | OutputRdrProg
   | OutputFrSim
   | OutputRawInstr
   | OutputDot
@@ -34,11 +35,12 @@ runAllPasses s = runUniqueM $ do
   grRes <- runGraphPass frRes
   return (frRes, grRes)
 
-outputPass ((_, fs), (iss, gs)) opts = do
+outputPass ((prog, _, fs), (iss, gs)) opts = do
   mapM_ show_opt opts
   where
     show_opt opt = case opt of
       OutputNothing -> return ()
+      OutputRdrProg -> putStrLn . show . pprProgram $ prog
       OutputFrSim -> mapM_ (putStrLn . show . pprFunc) fs
       OutputDot -> do
         dots <- forM (zip fs gs) $ \(f, g) -> do
@@ -54,14 +56,15 @@ runParsePass :: String -> Program String
 runParsePass = readProgram
 
 runFrontendPass :: Program String ->
-                   UniqueM (([String], [Operand], [Data Operand]),
+                   UniqueM (Program String,
+                            ([String], [Operand], [Data Operand]),
                             [Func Operand])
 runFrontendPass rdrProg = do
   (rnDatas, rnFuncs, exports, clobRegs) <- runRenameM (rename rdrProg)
   (simDatas, simFuncs) <- FrSim.runSimplifyM (FrSim.simplify rnDatas rnFuncs)
-  return ((exports, clobRegs, simDatas), simFuncs)
+  return (rdrProg, (exports, clobRegs, simDatas), simFuncs)
 
-runGraphPass (x, simFuncs) = do
+runGraphPass (_, _, simFuncs) = do
   insnss <- mapM (TacMun.runMunchM . TacMun.munch) simFuncs
   rawGraphs <- mapM (runGraphBuilderM . buildGraph) insnss
   let simGraphs = map GrSim.simplify rawGraphs

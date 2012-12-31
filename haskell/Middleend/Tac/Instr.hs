@@ -41,7 +41,7 @@ data Instr
   | RET           (Maybe Operand)
   | JIF    MachOp (Operand, Operand) Imm Imm -- cmpOp 2xOps ifTrue ifFalse
   | JMP           Imm
-  | CALL   CConv  Operand Operand [Operand] -- retval func args
+  | CALL   CConv  (Maybe Operand) Operand [Operand] -- retval func args
 
 type CConv = [CallingConv]
 
@@ -66,8 +66,9 @@ ppr_instr i = case i of
     text "jif" <+> ppr r1 <+> text (show_rel rel) <+> ppr r2 <+>
     brackets (hcat (punctuate comma (map pprImm [lbl1, lbl2])))
   JMP lbl -> text "jmp" <+> pprImm lbl
-  CALL conv o f args ->
-    ppr o <+> text ":=" <+> text "call" <+> text (show conv) <+>
+  CALL conv mo f args -> (case mo of
+    Just o -> ppr o <+> text ":="
+    Nothing -> empty) <+> text "call" <+> text (show conv) <+>
     ppr f <+> (parens (hcat (punctuate comma (map ppr args))))
   where
     ppr_operands operands = hcat (punctuate comma (map ppr operands))
@@ -84,7 +85,9 @@ ppr_instr i = case i of
       AMul -> "*"
       ADiv -> "/"
       BShl -> "<<"
-      _ -> error $ show rator
+      RLt -> "<"
+      RGt -> ">"
+      _ -> error $ "Tac.Instr.ppr_rator: " ++ show rator
     ppr_width w = text $ case w of
       W8 -> "byte"
       W16 -> "word"
@@ -113,7 +116,8 @@ ir_isLabelInstr i = case i of
 ir_getLabelOfInstr (LABEL imm) = imm
 
 ir_isFallThroughInstr i = case i of
-  CALL _ _ _ _ -> True
+  CALL conv _ _ _ -> Noret `notElem` conv &&
+                     TailCall `notElem` conv
   _ -> False
 
 ir_mkJumpInstr = JMP

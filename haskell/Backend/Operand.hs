@@ -20,6 +20,7 @@ module Backend.Operand (
   pprCallingConvs,
 ) where
 
+import Data.Tuple (swap)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Text.PrettyPrint
@@ -61,10 +62,13 @@ data Operand
 data CallingConv
   = TailCall
   | Vararg
+  | Noret
   deriving (Show, Eq, Ord)
 
 callingConvNames = Map.fromList [("tail", TailCall),
-                                 ("vararg", Vararg)]
+                                 ("vararg", Vararg),
+                                 ("noret", Noret)]
+callingConvToName = Map.fromList (map swap (Map.toList callingConvNames))
 parseCallingConv :: String -> Maybe [CallingConv]
 parseCallingConv s = mapM parse_one (split "/" s)
   where
@@ -121,8 +125,6 @@ pprCallingConvs cs = if null cs
   then empty
   else doubleQuotes (hcat (punctuate (char '/') (map ppr_calling_conv cs)))
   where
-    ppr_calling_conv c = case c of
-      TailCall -> text "tail"
-      Vararg -> text "vararg"
+    ppr_calling_conv c = text (callingConvToName Map.! c)
 
 

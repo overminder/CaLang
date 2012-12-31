@@ -85,6 +85,7 @@ reverseCond op = case op of
   RNe -> REq
   RGt -> RLe
   RGe -> RLt
+  _ -> error $ "Backend.Class.reverseCond: not a cond: " ++ show op
 
 isCondOp :: MachOp -> Bool
 isCondOp op = case op of

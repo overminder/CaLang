@@ -55,7 +55,7 @@ data Func a
 
 data Stmt a
   = SAssign (Expr a) (Expr a)
-  | SVarDecl (Binding a)
+  | SVarDecl [Binding a]
   | SIf (Expr a) (Stmt a) (Stmt a)
   | SWhile (Expr a) (Stmt a)
   | SBlock [Stmt a]
@@ -162,7 +162,7 @@ pprScope s = case s of
 pprStmt :: Ppr a => Stmt a -> Doc
 pprStmt s = case s of
   SAssign e1 e2 -> pprExpr e1 <+> char '=' <+> pprExpr e2 <> semi
-  SVarDecl b -> pprBinding b <> semi
+  SVarDecl bs -> hcat (map (\b -> pprBinding b <> semi) bs)
   SIf e s1 s2 -> text "if" <+> pprExpr e <+>
                  pprStmt s1 $$
                  text "else" <+> pprStmt s2

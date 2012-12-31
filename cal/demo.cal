@@ -4,6 +4,12 @@
 // Scope declaration
 export stg_apply_p;
 
+import printf, exit, __FrameDescr__, stg_collectGarbage;
+
+i64 stg_Thunk_p_info = {
+    1, 2, 3
+};
+
 // Global register variable declaration
 // Those registers will not be allocated by the Register Allocator
 register Hp "%rbx";
@@ -49,7 +55,7 @@ labeldefault:
         // Call with vararg calling convention
         call "vararg" printf("stg_apply_p: Arity %ld not implemented\n.",
                              arity);
-        call "" exit(1);
+        call "noret" exit(1);
     }
     // Return using default convention
     return 1;
@@ -58,7 +64,7 @@ labeldefault:
 stg_mkThunk_p(gcptr func, gcptr arg1) {
     i64 newThunk;
 
-    Hp = Hp + size;
+    Hp = Hp + 24;
     newThunk = Hp;
     if (Hp > HpLim) {
         // __FrameDescr__ is an implicit variable that contains information
@@ -69,7 +75,7 @@ stg_mkThunk_p(gcptr func, gcptr arg1) {
         // This should be straightforward...
         // We may also add stack walking functions for the collector
         // to use.
-        newThunk = call "" stg_collectGarbage(__FrameDescr__, size);
+        newThunk = call "" stg_collectGarbage(__FrameDescr__, 24);
     }
     // Symbol address is taken using their name
     // If we want the content of a symbol address, we need to explicitly

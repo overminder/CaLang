@@ -1,0 +1,10 @@
+
+sumTail(i64 s, i64 i) {
+    if (i < 1) {
+        return s;
+    }
+    else {
+        call "tail" sumTail(s + i, i - 1);
+    }
+}
+

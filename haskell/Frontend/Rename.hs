@@ -161,11 +161,11 @@ mkNameResolver = do
                        error $ "Rename.mkNameResolver: unknown var: " ++
                                name ++ errMsg
                        where
-                         localDctRepr = show localDct
-                         globalDctRepr = show globalDct
-                         errMsg = ". Dict traversed: " ++
-                                  localDctRepr ++ " and " ++ 
-                                  globalDctRepr
+                         localVars = show (Map.keys localDct)
+                         globalVars = show (Map.keys globalDct)
+                         errMsg = ". Local vars: " ++
+                                  localVars ++ ", global vars: " ++ 
+                                  globalVars
   return f
 
 -- width -> vreg
@@ -176,7 +176,7 @@ newTempLabel name = lift $ Op.newTempLabel name
 -- First pass on function: scan local label defs and var defs.
 scanStmt :: Stmt Name -> FuncM ()
 scanStmt s = case s of
-  SVarDecl (ty, name) -> do
+  SVarDecl bs -> forM_ bs $ \(ty, name) -> do
     op <- lift $ newVReg ty
     addLocal name op
   SLabel name -> do
@@ -184,5 +184,10 @@ scanStmt s = case s of
     addLocal name label
   SBlock xs -> do
     mapM_ scanStmt xs
+  SIf e s1 s2 -> do
+    scanStmt s1
+    scanStmt s2
+  SWhile e s -> do
+    scanStmt s
   _ -> return ()
 

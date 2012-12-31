@@ -11,3 +11,4 @@ sum(i64 n) {
     }
     return s;
 }
+
