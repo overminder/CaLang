@@ -15,7 +15,7 @@ module Backend.Operand (
   newVReg,
   newTempLabel,
 
-  pprReg,
+  pprReg, pprImm, pprAddr,
   pprWidth,
   pprCallingConvs,
 ) where
@@ -42,13 +42,6 @@ instance Register Reg where
   getRegName r = case r of
     VReg (MkRegId i) cl w gcf -> '%':show i
     PReg pr -> getRegName pr
-
-data Imm
-  = IntVal Integer
-  | FloatVal Double
-  | NamedLabel String
-  | TempLabel String Unique
-  deriving (Show, Eq, Ord)
 
 -- base + disp + index(r * i)
 data Addr
@@ -103,6 +96,7 @@ pprImm i = case i of
   IntVal iVal -> integer iVal
   NamedLabel s -> text s
   TempLabel s t -> text $ ".L" ++ s ++ show t
+  BlockLabel i -> text $ ".LBlock" ++ show i
 
 pprAddr :: Addr -> Doc
 pprAddr (MkAddr base index disp) = disp_str <> parens (base_str <> index_str)

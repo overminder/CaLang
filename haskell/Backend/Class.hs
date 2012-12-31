@@ -1,6 +1,7 @@
 module Backend.Class (
-  Register(..),
+  Register(..), Instruction(..),
   StorageType,
+  Imm(..),
   OpClass(..),
   OpWidth(..), opWidths, intToWidth,
   GcFlag(..),
@@ -8,10 +9,29 @@ module Backend.Class (
   MachOp(..), reverseCond, isCondOp,
 ) where
 
+import Utils.Unique
+
 class Register r where
   isVirtualReg :: r -> Bool
   mkRegFromString :: String -> Maybe r
   getRegName :: r -> String
+
+class Instruction instr where
+  isBranchInstr :: instr -> Bool
+  localBranchTargets :: instr -> [Imm]
+  isLabelInstr :: instr -> Bool
+  getLabelOfInstr :: instr -> Imm
+  isFallThroughInstr :: instr -> Bool
+  mkJumpInstr :: Imm -> instr
+  renameBranchInstrLabel :: (Imm -> Imm) -> instr -> instr
+
+data Imm
+  = IntVal Integer
+  | FloatVal Double
+  | NamedLabel String
+  | TempLabel String Unique
+  | BlockLabel Unique -- Used in flow graph
+  deriving (Show, Eq, Ord)
 
 data OpClass
   = FloatingOp

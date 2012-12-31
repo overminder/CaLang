@@ -5,7 +5,7 @@ OUT = Test-c
 all : $(OUT)
 
 $(OUT) : $(HS_SRC)
-	ghc --make Main.hs -cpp $(CPPFLAGS) -o $(OUT)
+	ghc --make Test.hs -cpp $(CPPFLAGS) -o $(OUT)
 
 clean :
 	find -name "*.o" -delete

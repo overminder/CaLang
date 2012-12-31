@@ -7,7 +7,7 @@ module Frontend.Simplify (
 --    with labels
 --  * Lift logical expressions out and turn them into If statements
 --  * Lift nested call so that each child of a call cannot be a call
---  * Desugar switch
+--  * Make and attach jump table for switch statement
 --  * Remove literal nodes in functions
 --  * Desugar if and while so that functions only contain simple branches:
 --    if (e) { goto L1; }
@@ -68,7 +68,6 @@ simplifyFunc :: Func Operand -> SimplifyM (Func Operand)
 simplifyFunc (Func name args body) = do
   body' <- runPipeline [extractStr,
                         extractJumpTable,
-                        liftLogicalOp,
                         liftNestedCall,
                         desugarControlStmt,
                         return . cleanLiteral,
@@ -121,12 +120,9 @@ internString s = do
 
 extractJumpTable :: Stmt Operand -> SimplifyM (Stmt Operand)
 extractJumpTable s = case s of
-  SSwitch e labels -> do
+  SSwitch e labels Nothing -> do
     table_name <- mk_jump_table labels
-    return $ SJump (EUnary (MRef i64)
-                           (EBinary AAdd
-                                    (EVar table_name)
-                                    (EBinary BShl e (ELit (LInt 3)))))
+    return $ SSwitch e labels (Just table_name)
   SIf e s1 s2 -> do
     s1' <- transf s1
     s2' <- transf s2
@@ -147,50 +143,6 @@ extractJumpTable s = case s of
           table = LiteralData (i64, name) (LArr (map LSym labels))
       add_jump_table table
       return name
-
--- lift || && ! < <= > >= == != to if
--- XXX: Code generated is far from optimal, consider some opt?
-liftLogicalOp :: Stmt Operand -> SimplifyM (Stmt Operand)
-liftLogicalOp s = liftExprM lift_expr s
-  where
-    lift_expr :: Expr Operand -> SimplifyM (Expr Operand, [Stmt Operand])
-    lift_expr e = do
-      tmp <- liftM EVar (newVReg i64)
-      let set_tmp_zero = mk_set_stmt tmp 0
-          set_tmp_one  = mk_set_stmt tmp 1
-      case e of
-        EBinary bop e1 e2 -> do
-          (e1', s1s) <- lift_expr e1
-          (e2', s2s) <- lift_expr e2
-          case bop of 
-            LAnd -> do
-              let check_e1 = SIf e1' check_e2 set_tmp_zero
-                  check_e2 = SIf e2' set_tmp_zero set_tmp_one
-              return (tmp, s1s ++ s2s ++ [check_e1])
-            LOr -> do
-              let check_e1 = SIf e1' set_tmp_one check_e2
-                  check_e2 = SIf e2' set_tmp_one set_tmp_zero
-              return (tmp, s1s ++ s2s ++ [check_e1])
-            _ -> if isCondOp bop
-                   then return (tmp, s1s ++ s2s ++ [SIf (EBinary bop e1' e2')
-                                                        set_tmp_one
-                                                        set_tmp_zero])
-                   else return (EBinary bop e1' e2', s1s ++ s2s)
-        EUnary uop e -> do
-          (e', ss) <- lift_expr e
-          case uop of 
-            LNot -> do
-              tmp <- liftM EVar (newVReg i64)
-              let check_e = SIf e' set_tmp_zero set_tmp_one
-              return (tmp, ss ++ [check_e])
-            _ -> do
-              return (EUnary uop e', ss)
-        ECall conv func args -> do
-          (func', sfs) <- lift_expr func
-          (args', sas) <- liftM unzip (mapM lift_expr args)
-          return (ECall conv func' args', sfs ++ concat sas)
-        _ -> return (e, [])
-    mk_set_stmt op ival = SAssign op (ELit (LInt ival))
 
 liftNestedCall :: Stmt Operand -> SimplifyM (Stmt Operand)
 liftNestedCall s = liftExprM lift_expr s
@@ -220,6 +172,10 @@ liftNestedCall s = liftExprM lift_expr s
                      [SAssign tmp (ECall conv func' args')])
       _ -> lift_expr e
 
+-- Such that each basic block is started by a label (exact for entry)
+-- and ended by a control instr (ret/jmp/call)
+-- ... Well, seems that we cannot do that here (User can insert label
+--     anywhere). Instead we ensure this invariant in the flow graph builder.
 desugarControlStmt :: Stmt Operand -> SimplifyM (Stmt Operand)
 desugarControlStmt s = do
   xs <- desugar s

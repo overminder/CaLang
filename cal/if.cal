@@ -1,0 +1,7 @@
+
+main(i64 argc, i64 argv) {
+    if argc == 0
+        return 0;
+    else
+        return 1;
+}

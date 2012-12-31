@@ -6,7 +6,59 @@ module Backend.X64.Instr (
 import Text.PrettyPrint
 
 import Backend.Operand
+import Backend.Class
 import Utils.Class
+
+instance Instruction Instr where
+  isBranchInstr = x64_isBranchInstr
+  localBranchTargets = x64_localBranchTargets
+  isLabelInstr = x64_isLabelInstr
+  getLabelOfInstr = x64_getLabelOfInstr
+  isFallThroughInstr = x64_isFallThroughInstr
+  mkJumpInstr = x64_mkJumpInstr
+  renameBranchInstrLabel = x64_renameBranchInstrLabel
+
+x64_isBranchInstr i = case i of
+  JMP  _     -> True
+  JXX  _ _   -> True
+  CALL _     -> True
+  RET        -> True
+  SWITCH _ _ -> True
+  _          -> False
+
+x64_isFallThroughInstr i = case i of
+  JMP  _     -> False
+  JXX  _ _   -> True
+  CALL _     -> True
+  RET        -> False
+  SWITCH _ _ -> False
+  _          -> error $ "x64_isFallThroughInstr: not a branch instr"
+
+x64_localBranchTargets i = case i of
+  JMP op -> case op of
+    OpImm t@(TempLabel _ _) -> [t]
+    _ -> []
+  JXX _ imm -> [imm]
+  CALL _ -> []
+  RET -> []
+  SWITCH _ lbls -> lbls
+  _ -> error $ "x64_localBranchTarget: not a branch instr"
+
+x64_isLabelInstr i = case i of
+  LABEL _ -> True
+  _ -> False
+
+x64_getLabelOfInstr i = case i of
+  LABEL (OpImm lbl) -> lbl
+  _ -> error $ "x64_getLabelOfInstr: not a label instr"
+
+x64_mkJumpInstr = JMP . OpImm
+
+x64_renameBranchInstrLabel f instr = case instr of
+  JMP (OpImm i) -> JMP (OpImm (f i))
+  JXX c i -> JXX c (f i)
+  SWITCH op is -> SWITCH op (map f is)
+  _ -> instr
 
 data Instr
   = LABEL  Operand
@@ -46,15 +98,19 @@ data Instr
 
   -- Branches
   | JMP    Operand
+  | SWITCH Operand [Imm] -- jump to multiple basic blocks
   | JXX    Cond Imm      -- J/Jg/Jge/Jxx...
   | CALL   Operand
   | RET
+  deriving (Show)
 
 type Cond = MachOp
 
 pprInstr :: Instr -> Doc
 pprInstr i = case i of
   LABEL o -> ppr o <> colon
+  SWITCH o lbls -> pprInstr (JMP o) <+> text "# SWITCH =>" <+>
+                   brackets (hcat (punctuate comma (map pprImm lbls)))
   _ -> text pref <+> (hcat (punctuate comma (map ppr operands)))
   where
     (pref, operands) = disas i

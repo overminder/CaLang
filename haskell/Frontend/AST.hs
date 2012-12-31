@@ -15,6 +15,7 @@ module Frontend.AST (
   pprProgram,
   pprFunc,
   pprData,
+  pprBinding,
 ) where
 
 import Control.Monad hiding (mapM)
@@ -62,7 +63,7 @@ data Stmt a
   | SJump (Expr a)
   | SExpr (Expr a)
   | SLabel a
-  | SSwitch (Expr a) [a]
+  | SSwitch (Expr a) [a] (Maybe a) -- expr labels jumpTable 
   deriving (Show, Functor)
 
 data Expr a
@@ -173,9 +174,12 @@ pprStmt s = case s of
   SJump e -> text "jump" <+> pprExpr e <> semi
   SExpr e -> pprExpr e <> semi
   SLabel name -> ppr name <> colon
-  SSwitch e branches ->
+  SSwitch e branches tab ->
     text "switch" <+> pprExpr e <+>
-    brackets (hcat (punctuate comma (map ppr branches))) <> semi
+    brackets (hcat (punctuate comma (map ppr branches))) <+>
+    (case tab of
+      Just tab' -> text "=>" <+> ppr tab'
+      Nothing -> empty) <> semi
 
 pprExpr :: Ppr a => Expr a -> Doc
 pprExpr e = case e of
@@ -227,7 +231,9 @@ traverseExprM f s = case s of
   SJump e -> liftM SJump (f e)
   SExpr e -> liftM SExpr (f e)
   SLabel _ -> return s
-  SSwitch e xs -> liftM (flip SSwitch xs) (f e)
+  SSwitch e xs tab -> do
+    e' <- f e
+    return $ SSwitch e' xs tab
 
 traverseExpr :: (Expr a -> Expr a) -> Stmt a -> Stmt a
 traverseExpr f s = runIdentity (traverseExprM (return . f) s)
@@ -267,7 +273,7 @@ liftExprM f s = do
       (e', ss) <- f e
       return $ ss ++ [SExpr e']
     SLabel _ -> return [s]
-    SSwitch e labels -> do
+    SSwitch e labels tab -> do
       (e', ss) <- f e
-      return $ ss ++ [SSwitch e' labels]
+      return $ ss ++ [SSwitch e' labels tab]
 

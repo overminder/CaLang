@@ -1,0 +1,39 @@
+
+interp(i64 co, i64 sp) {
+    i64 a; i64 b;
+    i64 x; i64 w; i64 v;
+
+start:
+    a = i8[co];
+    switch a [add, dup, pop, push, load, end];
+add:
+    v = i64[sp];
+    x = i64[sp + 8];
+    sp = sp + 8;
+    i64[sp + 8] = v + x;
+    jump start;
+dup:
+    v = i64[sp];
+    sp = sp - 8;
+    i64[sp] = v;
+    jump start;
+pop:
+    sp = sp + 8;
+    jump start;
+push:
+    b = i8[co + 1];
+    co = co + 2;
+
+    sp = sp - 8;
+    i64[sp] = b;
+    jump start;
+load:
+    b = i8[co + 1];
+    co = co + 2;
+
+    i64[sp - 8] = i64[sp - b << 3];
+    sp = sp - 8;
+    jump start;
+end:
+    return i64[sp];
+}

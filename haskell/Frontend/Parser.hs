@@ -161,7 +161,7 @@ pSwitchStmt = do
   e <- pExpr
   branches <- brackets (sepBy ident comma)
   semi
-  return $ SSwitch e branches
+  return $ SSwitch e branches Nothing
 
 pLabelStmt = do
   name <- ident
