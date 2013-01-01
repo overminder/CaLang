@@ -1,0 +1,10 @@
+
+main(i64 a) {
+    i64 c, d, e, f;
+    c = a + a;
+    d = a + a;
+    e = a + a;
+    f = a + a;
+    a = a + a;
+    return a;
+}

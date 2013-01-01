@@ -1,29 +1,14 @@
-module Backend.Class (
-  Register(..), Instruction(..),
+module Backend.Common (
   StorageType,
   Imm(..),
   OpClass(..),
   OpWidth(..), opWidths, intToWidth,
   GcFlag(..),
   RegId(..),
-  MachOp(..), reverseCond, isCondOp,
+  MachOp(..), reverseCond, isCondOp, showMachOp,
 ) where
 
 import Utils.Unique
-
-class Register r where
-  isVirtualReg :: r -> Bool
-  mkRegFromString :: String -> Maybe r
-  getRegName :: r -> String
-
-class Instruction instr where
-  isBranchInstr :: instr -> Bool
-  localBranchTargets :: instr -> [Imm]
-  isLabelInstr :: instr -> Bool
-  getLabelOfInstr :: instr -> Imm
-  isFallThroughInstr :: instr -> Bool
-  mkJumpInstr :: Imm -> instr
-  renameBranchInstrLabel :: (Imm -> Imm) -> instr -> instr
 
 data Imm
   = IntVal Integer
@@ -76,6 +61,31 @@ data MachOp
   -- Memory
   | MRef StorageType
   deriving (Show, Eq, Ord)
+
+showMachOp :: MachOp -> String
+showMachOp o = case o of
+  AAdd -> "+"
+  ASub -> "-"
+  AMul -> "*"
+  ADiv -> "/"
+  AMod -> "%"
+  ANeg -> "-"
+  RLt  -> "<"
+  RLe  -> "<="
+  RGt  -> ">"
+  RGe  -> ">="
+  REq  -> "=="
+  RNe  -> "!="
+  LAnd -> "&&"
+  LOr  -> "||"
+  LNot -> "!"
+  BAnd -> "&"
+  BOr  -> "|"
+  BXor -> "^"
+  BShr -> ">>"
+  BShl -> "<<"
+  BNot -> "~"
+  MRef _ -> "[MRef]"
 
 reverseCond :: MachOp -> MachOp
 reverseCond op = case op of

@@ -15,7 +15,6 @@ import qualified Data.Set as Set
 import Text.Dot
 
 import Backend.Operand
-import Backend.Class
 import qualified Utils.Unique as Unique
 import Utils.Class
 
@@ -73,9 +72,6 @@ buildGraph is = do
   }
   mapM_ addInstr is
   resolveLazyLinks
-
-pass :: forall m. Monad m => m ()
-pass = return ()
 
 addInstr :: forall a. Instruction a => a -> GraphBuilderM a ()
 addInstr i

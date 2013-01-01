@@ -2,10 +2,11 @@ module Middleend.Tac.Instr (
   Instr(..),
 ) where
 
+import Data.Foldable
+import Prelude hiding (concat, notElem)
 import Text.PrettyPrint
 
 import Backend.Operand
-import Backend.Class
 import Utils.Class
 
 instance Instruction Instr where
@@ -16,6 +17,8 @@ instance Instruction Instr where
   isFallThroughInstr = ir_isFallThroughInstr
   mkJumpInstr = ir_mkJumpInstr
   renameBranchInstrLabel = ir_renameBranchInstrLabel
+  getUseOfInstr = ir_getUseOfInstr
+  getDefOfInstr = ir_getDefOfInstr
 
 instance Ppr Instr where
   ppr = ppr_instr
@@ -30,18 +33,18 @@ data Instr
   | PROLOG
   | EPILOG
 
-  | MOV           Operand Operand
-  | BINOP  MachOp Operand Operand Operand
-  | UNROP  MachOp Operand Operand
+  | MOV           Reg Operand
+  | BINOP  MachOp Reg Operand Operand
+  | UNROP  MachOp Reg Operand
 
-  | LOAD  OpWidth Operand Operand -- dest <- [src]
-  | STORE OpWidth Operand Operand -- [src] <- dest
+  | LOAD  OpWidth Reg Operand -- dest <- [src]
+  | STORE OpWidth Reg Operand -- [src] <- dest
 
   | CASEJUMP      Operand [Imm]
   | RET           (Maybe Operand)
   | JIF    MachOp (Operand, Operand) Imm Imm -- cmpOp 2xOps ifTrue ifFalse
   | JMP           Imm
-  | CALL   CConv  (Maybe Operand) Operand [Operand] -- retval func args
+  | CALL   CConv  (Maybe Reg) Operand [Operand] -- retval func args
 
 type CConv = [CallingConv]
 
@@ -50,13 +53,13 @@ ppr_instr i = case i of
   LABEL lbl -> pprImm lbl <> colon
   PROLOG -> text "prologue"
   EPILOG -> text "epilogue"
-  MOV o1 o2 -> ppr o1 <+> text ":=" <+> ppr o2
-  BINOP mop o1 o2 o3 -> ppr o1 <+> text ":=" <+> ppr o2 <+>
+  MOV r1 o2 -> pprReg r1 <+> text ":=" <+> ppr o2
+  BINOP mop r1 o2 o3 -> pprReg r1 <+> text ":=" <+> ppr o2 <+>
                         ppr_rator mop <+> ppr o3
-  UNROP mop o1 o2 -> ppr o1 <+> text ":=" <+> ppr_rator mop <+> ppr o2
-  LOAD w o1 o2 -> ppr o1 <+> text ":=" <+> text "load" <> ppr_width w <+>
+  UNROP mop r1 o2 -> pprReg r1 <+> text ":=" <+> ppr_rator mop <+> ppr o2
+  LOAD w r1 o2 -> pprReg r1 <+> text ":=" <+> text "load" <> ppr_width w <+>
                   brackets (ppr o2)
-  STORE w o1 o2 -> brackets (ppr o1) <+> text ":=" <+> text "store" <>
+  STORE w r1 o2 -> brackets (pprReg r1) <+> text ":=" <+> text "store" <>
                    ppr_width w <+> ppr o2
   CASEJUMP o lbls -> text "casejmp" <+> ppr_operands [o] <+> text "# TO" <+>
                      brackets (hcat (punctuate comma (map pprImm lbls)))
@@ -67,7 +70,7 @@ ppr_instr i = case i of
     brackets (hcat (punctuate comma (map pprImm [lbl1, lbl2])))
   JMP lbl -> text "jmp" <+> pprImm lbl
   CALL conv mo f args -> (case mo of
-    Just o -> ppr o <+> text ":="
+    Just r -> pprReg r <+> text ":="
     Nothing -> empty) <+> text "call" <+> text (show conv) <+>
     ppr f <+> (parens (hcat (punctuate comma (map ppr args))))
   where
@@ -85,8 +88,6 @@ ppr_instr i = case i of
       AMul -> "*"
       ADiv -> "/"
       BShl -> "<<"
-      RLt -> "<"
-      RGt -> ">"
       _ -> error $ "Tac.Instr.ppr_rator: " ++ show rator
     ppr_width w = text $ case w of
       W8 -> "byte"
@@ -127,4 +128,30 @@ ir_renameBranchInstrLabel f i = case i of
   JIF m ops i1 i2 -> JIF m ops (f i1) (f i2)
   CASEJUMP op is -> CASEJUMP op (map f is)
   _ -> i
+
+ir_getDefOfInstr instr = case instr of
+  MOV r1 _ -> [r1]
+  BINOP _ r1 _ _ -> [r1]
+  UNROP _ r1 _ -> [r1]
+  LOAD _ r1 _ -> [r1]
+  CALL _ mbR _ _ -> toList mbR
+  _ -> []
+
+ir_getUseOfInstr instr = case instr of
+  MOV _ o2 -> to_reg [o2]
+  BINOP _ _ o2 o3 -> to_reg [o2, o3]
+  UNROP _ _ o2 -> to_reg [o2]
+  LOAD _ _ o2 -> to_reg [o2]
+  STORE _ r1 o2 -> r1 : to_reg [o2]
+  CASEJUMP o1 _ -> to_reg [o1]
+  RET mOp -> to_reg (toList mOp)
+  JIF _ (o1, o2) _ _ -> to_reg [o1, o2]
+  CALL _ _ f args -> to_reg (f:args)
+  _ -> []
+  where
+    to_reg ops = concat (map as_reg ops)
+    as_reg op = case op of
+      OpReg r -> [r]
+      _ -> []
+
 

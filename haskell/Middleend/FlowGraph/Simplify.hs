@@ -11,7 +11,6 @@ import Text.Dot
 
 import Middleend.FlowGraph.Builder
 import Backend.Operand
-import Backend.Class
 
 simplify :: forall a. Instruction a => FlowGraph a -> FlowGraph a
 simplify g = run_pipeline passes

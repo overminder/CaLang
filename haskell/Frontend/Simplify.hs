@@ -24,7 +24,6 @@ import qualified Utils.Unique as Unique
 import Frontend.AST
 import Backend.Operand hiding (newVReg, newTempLabel)
 import qualified Backend.Operand as Op
-import Backend.Class
 
 type CompilerM = Unique.UniqueM
 type SimplifyM = StateT SimState CompilerM

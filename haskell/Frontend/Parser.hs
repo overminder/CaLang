@@ -15,7 +15,6 @@ import qualified Text.Parsec.Token as T
 
 import Frontend.AST
 import Backend.Operand
-import Backend.Class
 
 languageDef
   = emptyDef { T.commentStart    = "/*"
