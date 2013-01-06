@@ -3,14 +3,15 @@ module Middleend.Tac.LocalOpt (
   runOpt,
 ) where
 
-import Control.Monad.State hiding (forM_)
+import Control.Monad.State hiding (forM_, forM, mapM)
 import Data.Foldable
+import Data.Traversable
 import Data.Maybe
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
-import Prelude hiding (foldr)
+import Prelude hiding (foldr, mapM)
 import Text.PrettyPrint
 
 import Middleend.Tac.Instr
@@ -21,27 +22,30 @@ import Utils.Class
 import qualified Utils.Unique as Unique
 
 -- Block-level local optimization
+-- TODO: take the control instr into consideration.
+--       -- and -- generalize all the things.
 
--- for instr in instr_list:
---     if instr.is_arith:
---         vreg = new_vreg
---         set_alias(instr.dest, vreg)
---         instr.set_dest(vreg)
---         instr.replace_operand_with_alias
---         instr.memorize # a1 := b1 + c2, memorize a1 as (b1 + c2)
---     ...
+-- for instr in block:
+--     instr.def.assign_number
+--     instr.rhs.memorize_const_or_availexpr_or_alias
 --
--- for instr in instr_list:
---     if instr.is_arith:
---         if instr.rhs.is_avaiable:
---             instr.replace_operand_with_alias
+-- for instr in block:
+--     if instr.is_pure:
+--         instr.rhs.filter(is_alias).map(deref_alias)
+--         instr.rhs.filter(is_const).map(get_const_value)
+--         if instr.rhs.is_availexpr:
+--             instr.rhs = instr.rhs.get_availexpr_reg
+--
+-- for instr in block:
+--     instr.calculate_liveness
 -- 
--- for instr in instr_list:
---     if instr.is_pure and use(instr.lhs) == None:
---         instr.remove
+-- for instr in block:
+--     if instr.is_pure and not instr.def.live_out
+--         block.remove(instr)
 
 data Expr
-  = Unary MachOp Operand
+  = ExprImm Imm
+  | Unary MachOp Operand
   | Binary MachOp Operand Operand
   deriving (Eq, Ord)
 
@@ -78,17 +82,22 @@ runOpt g = do
     strip_info = fst
     run_passes :: BasicBlock Instr -> OptM (BasicBlock InstrWithInfo)
     run_passes b = do
-      let is = instrList b
+      let is = instrList b ++ [fromJust (controlInstr b)]
       ifs <- runInstrM doValueNumbering (zip is (repeat (emptyInfo, emptyInfo)))
-      ifs <- runInstrM gatherAvailExpr ifs
-      ifs <- insertPhiFunction ifs
+      let vnInstr = init ifs
+          vnLast = last ifs
+      has_no_succ <- liftM hasNoSucc get
+      ifs <- if has_no_succ
+               then return vnInstr
+               else insertPhiFunction vnInstr
+      let phiInstr = ifs ++ [vnLast]
+      ifs <- runInstrM gatherAvailExpr phiInstr
       ifs <- runIterInstrM (runInstrM all_opts) ifs
       ifs <- runIterInstrM doDCE ifs
       return $ MkBlock {
         blockId = blockId b,
-        instrList = ifs,
-        controlInstr = fmap (\i -> (i, (emptyInfo, emptyInfo)))
-                            (controlInstr b),
+        instrList = init ifs,
+        controlInstr = Just (last ifs),
         blockLabels = blockLabels b
       }
     all_opts i = do
@@ -143,8 +152,6 @@ instance Ppr InstrWithInfo where
   ppr (i, (info_in, info_out)) =
     ppr i <+> text ";; IN:" <+> pprInstrInfo info_in <+>
               text "out:" <+> pprInstrInfo info_out
-
-flip3 f b c a = f a b c
 
 emptyInfo = MkInstrInfo {
   currNumbering = Map.empty,
@@ -204,7 +211,20 @@ doValueNumbering instr = case instr of
     o2' <- findCurrAlias o2
     OpReg r1' <- findCurrAlias (OpReg r1)
     return $ LOAD w r1' o2'
-  _ -> return instr -- pro/epilog
+  RET o -> do
+    o' <- mapM findCurrAlias o
+    return $ RET o'
+  PROLOG -> return instr
+  JIF cond (o2, o3) ifTrue ifFalse -> do
+    o2' <- findCurrAlias o2
+    o3' <- findCurrAlias o3
+    return $ JIF cond (o2', o3') ifTrue ifFalse
+  JMP _ -> return instr
+  CALL conv mbRes func args -> do
+    func' <- findCurrAlias func
+    args' <- mapM findCurrAlias args
+    return $ CALL conv mbRes func' args'
+  _ -> error $ "doValueNumbering: not implemented: " ++ show instr
 --
 
 applyTFunc :: (InstrInfo -> InstrInfo) -> InstrM ()
@@ -260,12 +280,20 @@ gatherAvailExpr instr = do
     MOV r1 o2 ->
       case o2 of
         OpReg r2 -> addAliasPair r1 r2
-        OpImm i -> addConstTemp r1 i
+        OpImm i -> do
+          addConstTemp r1 i
+          addAvailExpr (ExprImm i) r1
     BINOP bop r1 o2 o3 -> do
       addAvailExpr (Binary bop o2 o3) r1
     UNROP uop r1 o2 -> do
       addAvailExpr (Unary uop o2) r1
-    _ -> pass
+    PROLOG -> pass
+    RET _ -> pass
+    JIF _ _ _ _ -> pass
+    JMP _ -> pass
+    CALL _ _ _ _ -> pass
+    LOAD _ _ _ -> pass -- Keep it simple for now.
+    _ -> error $ "gatherAvailExpr: not implemented: " ++ show instr
   return instr
 
 addAvailExpr :: Expr -> Reg -> InstrM ()
@@ -302,8 +330,23 @@ insertPhiFunction ifs = do
 
 -- add %dest, %o2, %o3 where (+ %o2 %o3) is an available expr defined by
 -- %ae ==> mov %dest, %ae; set %dest to be an alias for %ae.
+-- also, mov %dest, %i where %i is an available const expr defiend by %rk
+--     ==> mov %dest, %rk
+-- There is no need to remove AE since previous AE info is never overwritten
+-- by later AE info.
 doCSE :: Instr -> InstrM Instr
 doCSE instr = case instr of
+  MOV dest o2 -> do
+    case o2 of
+      OpImm i -> do
+        maybe_k <- findAvailExpr (ExprImm i)
+        case maybe_k of
+          Just r -> do
+            lift $ setNeedsMoarIter True
+            setAliasFor dest r
+            return $ MOV dest (OpReg r)
+          _ -> return instr
+      _ -> return instr
   BINOP bop dest o2 o3 -> do
     maybe_ae <- findAvailExpr (Binary bop o2 o3)
     case maybe_ae of
@@ -312,7 +355,13 @@ doCSE instr = case instr of
         setAliasFor dest ae
         return $ MOV dest (OpReg ae)
       Nothing -> return instr
-  _ -> return instr
+  RET _ -> return instr
+  PROLOG -> return instr
+  JIF _ _ _ _ -> return instr
+  JMP _ -> return instr
+  LOAD _ _ _ -> return instr
+  CALL _ _ _ _ -> return instr
+  _ -> error $ "doCSE: not implemented: " ++ show instr
 
 -- mov %dest, %src where %src is an alias of %alias
 -- ==> mov %dest, %alias, remove alias pair (%dest, %src) and add alias pair
@@ -333,26 +382,37 @@ doAliasProp i = case i of
             return i
       _ -> return i
   BINOP bop dest o2 o3 -> do
-    o2' <- case o2 of
-      OpReg src -> do
-        maybe_alias <- derefAlias src
-        case maybe_alias of
-          Just alias -> do
-            lift $ setNeedsMoarIter True
-            return $ (OpReg alias)
-          Nothing -> do
-            return o2
-    o3' <- case o3 of
-      OpReg src -> do
-        maybe_alias <- derefAlias src
-        case maybe_alias of
-          Just alias -> do
-            lift $ setNeedsMoarIter True
-            return $ (OpReg alias)
-          Nothing -> do
-            return o3
+    o2' <- tryDerefAlias o2
+    o3' <- tryDerefAlias o3
     return $ BINOP bop dest o2' o3'
-  _ -> return i
+  RET mbr -> do
+    mbr' <- mapM tryDerefAlias mbr
+    return $ RET mbr'
+  PROLOG -> return PROLOG
+  JIF cond (o2, o3) ifTrue ifFalse -> do
+    o2' <- tryDerefAlias o2
+    o3' <- tryDerefAlias o3
+    return $ JIF cond (o2', o3') ifTrue ifFalse
+  JMP _ -> return i
+  LOAD w r o -> do
+    o' <- tryDerefAlias o
+    return $ LOAD w r o'
+  CALL conv mbRes func args -> do
+    func' <- tryDerefAlias func
+    args' <- mapM tryDerefAlias args
+    return $ CALL conv mbRes func' args'
+  _ -> error $ "doAliasProp: not implemented: " ++ show i
+  where
+    tryDerefAlias o = case o of
+      OpReg src -> do
+        maybe_alias <- derefAlias src
+        case maybe_alias of
+          Just alias -> do
+            lift $ setNeedsMoarIter True
+            return $ (OpReg alias)
+          Nothing -> do
+            return o
+      _ -> return o
 
 findAvailExpr :: Expr -> InstrM (Maybe Reg)
 findAvailExpr e = liftM (Map.lookup e . availExpr . fst . fst) get
@@ -423,5 +483,12 @@ doDCE ifs = do
       [] -> Just iwi
       [r] -> if Set.member r (liveness info_out)
         then Just iwi
-        else Nothing
+        else case instr of
+          MOV _ _ -> Nothing
+          UNROP _ _ _ -> Nothing
+          BINOP _ _ _ _ -> Nothing
+          _ -> Just iwi
+
+-- ...
+flip3 f b c a = f a b c
 

@@ -1,10 +1,12 @@
 module Driver (
-  runAllPasses,
-  outputPass,
-  OutputOpt(..),
+  driverMain
 ) where
 
 import Control.Monad
+import Control.Monad.Trans
+import Control.Monad.Reader
+import System.IO
+import System.Environment
 import Text.Dot
 import Text.PrettyPrint
 
@@ -22,6 +24,14 @@ import Backend.Operand
 --import Backend.HOST_ARCH.Instr
 import Utils.Unique
 import Utils.Class
+import Utils.OptParse
+
+data Option
+  = Option {
+    optInput :: Handle,
+    optOutput :: Handle,
+    optOutputLevel :: OutputOpt
+  }
 
 data OutputOpt
   = OutputNothing
@@ -31,31 +41,65 @@ data OutputOpt
   | OutputRawDot
   | OutputLocOptDot
 
+parseDriverOpt args = parseOpt options args emptyOption
+  where
+    emptyOption = Option stdin stdout OutputNothing
+    setOutputLevel wat = \x -> return $ x { optOutputLevel = wat }
+    options = [ BoolOption ["--rdrprog"] (setOutputLevel OutputRdrProg)
+              , BoolOption ["--frsim"] (setOutputLevel OutputFrSim)
+              , BoolOption ["--instr"] (setOutputLevel OutputRawInstr)
+              , BoolOption ["--dot"] (setOutputLevel OutputRawDot)
+              , BoolOption ["--locopt"] (setOutputLevel OutputLocOptDot)
+              , NamedStringOption ["-o"] setOutput
+              , StringOption setInput
+              ]
+    setInput path opt = case path of
+      "-" -> return opt
+      _ -> do
+        h <- openFile path ReadMode
+        return $ opt { optInput = h }
+    setOutput path opt = case path of
+      "-" -> return opt
+      _ -> do
+        h <- openFile path WriteMode
+        return $ opt { optOutput = h }
+
 runAllPasses s = runUniqueM $ do
   let rdrProg = runParsePass s
   frRes <- runFrontendPass rdrProg
   grRes <- runGraphPass frRes
   return (frRes, grRes)
 
-outputPass ((prog, _, fs), (iss, rgs, logs)) opts = do
-  mapM_ show_opt opts
-  where
-    show_opt opt = case opt of
-      OutputNothing -> return ()
-      OutputRdrProg -> putStrLn . show . pprProgram $ prog
-      OutputFrSim -> mapM_ (putStrLn . show . pprFunc) fs
-      OutputRawInstr -> do
-        forM_ (zip fs iss) $ \(f, is) -> do
-          putStrLn $ "# Entry for <" ++ show (pprSignature f) ++ ">"
-          mapM_ (putStrLn . show . ppr) is
-      OutputRawDot -> output_graphs fs rgs
-      OutputLocOptDot -> output_graphs fs logs
+driverMain = do
+  args <- getArgs
+  opt <- parseDriverOpt args
+  flip runReaderT opt $ do
+    h <- asks optInput
+    src <- lift $ hGetContents h
+    let result = runAllPasses src
+    outputPass result
 
+outputPass ((prog, _, fs), (iss, rgs, logs)) = do
+  h <- asks optOutput
+  level <- asks optOutputLevel
+  case level of
+    OutputNothing -> return ()
+    OutputRdrProg -> lift . hPutStrLn h . show . pprProgram $ prog
+    OutputFrSim -> mapM_ (lift . putStrLn . show . pprFunc) fs
+    OutputRawInstr -> do
+      forM_ (zip fs iss) $ \(f, is) -> do
+        lift . hPutStrLn h $ "# Entry for <" ++ show (pprSignature f) ++ ">"
+        mapM_ (lift . hPutStrLn h . show . ppr) is
+    OutputRawDot -> output_graphs fs rgs
+    OutputLocOptDot -> output_graphs fs logs
+
+    where
     output_graphs fs gs = do
+        h <- asks optOutput
         dots <- forM (zip fs gs) $ \(f, g) -> do
           return $ graphToDot (show (pprSignature f)) g
         let combined = sequence (map scope dots)
-        putStrLn . showDot $ combined
+        lift . hPutStrLn h . showDot $ combined
 
 runParsePass :: String -> Program String
 runParsePass = readProgram

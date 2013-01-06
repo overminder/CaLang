@@ -45,6 +45,7 @@ data Instr
   | JIF    MachOp (Operand, Operand) Imm Imm -- cmpOp 2xOps ifTrue ifFalse
   | JMP           Imm
   | CALL   CConv  (Maybe Reg) Operand [Operand] -- retval func args
+  deriving (Show)
 
 type CConv = [CallingConv]
 
@@ -75,20 +76,10 @@ ppr_instr i = case i of
     ppr f <+> (parens (hcat (punctuate comma (map ppr args))))
   where
     ppr_operands operands = hcat (punctuate comma (map ppr operands))
-    show_rel r = case r of
-      RGe -> ">="
-      RGt -> ">"
-      REq -> "=="
-      RNe -> "!="
-      RLe -> "<="
-      RLt -> "<"
-    ppr_rator rator = text $ case rator of
-      AAdd -> "+"
-      ASub -> "-"
-      AMul -> "*"
-      ADiv -> "/"
-      BShl -> "<<"
-      _ -> error $ "Tac.Instr.ppr_rator: " ++ show rator
+    show_rel op = if isCondOp op
+      then showMachOp op
+      else error $ "Tac.Instr.show_rel: not a relop: " ++ show op
+    ppr_rator = text . showMachOp
     ppr_width w = text $ case w of
       W8 -> "byte"
       W16 -> "word"
