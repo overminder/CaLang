@@ -21,8 +21,8 @@ type MunchM = WriterT [Instr] CompilerM
 runMunchM :: MunchM a -> CompilerM [Instr]
 runMunchM = execWriterT
 
-munch :: Func Operand -> MunchM ()
-munch (Func name args body) = do
+munch :: Stmt Operand -> MunchM ()
+munch body = do
   emit PROLOG
   munchStmt body
 

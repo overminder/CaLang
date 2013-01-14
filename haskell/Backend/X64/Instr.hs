@@ -5,7 +5,6 @@ module Backend.X64.Instr (
 import Text.PrettyPrint
 
 import Backend.Operand
-import Backend.Class
 import Utils.Class
 
 instance Instruction Instr where
@@ -16,33 +15,35 @@ instance Instruction Instr where
   isFallThroughInstr = x64_isFallThroughInstr
   mkJumpInstr = x64_mkJumpInstr
   renameBranchInstrLabel = x64_renameBranchInstrLabel
+  getUseOfInstr = x64_getUseOfInstr
+  getDefOfInstr = x64_getDefOfInstr
 
 instance Ppr Instr where
   ppr = ppr_instr
 
 x64_isBranchInstr i = case i of
-  JMP  _     -> True
+  JMP  _ _   -> True
   JXX  _ _   -> True
-  CALL _     -> True
-  RET        -> True
+  CALL _ _   -> True
+  RET _      -> True
   SWITCH _ _ -> True
   _          -> False
 
 x64_isFallThroughInstr i = case i of
-  JMP  _     -> False
+  JMP  _ _   -> False
   JXX  _ _   -> True
-  CALL _     -> True
-  RET        -> False
+  CALL _ _   -> True
+  RET _      -> False
   SWITCH _ _ -> False
   _          -> error $ "x64_isFallThroughInstr: not a branch instr"
 
 x64_localBranchTargets i = case i of
-  JMP op -> case op of
+  JMP op Nothing -> case op of
     OpImm t@(TempLabel _ _) -> [t]
     _ -> []
   JXX _ imm -> [imm]
-  CALL _ -> []
-  RET -> []
+  CALL _ _ -> []
+  RET _ -> []
   SWITCH _ lbls -> lbls
   _ -> error $ "x64_localBranchTarget: not a branch instr"
 
@@ -51,19 +52,26 @@ x64_isLabelInstr i = case i of
   _ -> False
 
 x64_getLabelOfInstr i = case i of
-  LABEL (OpImm lbl) -> lbl
+  LABEL imm -> imm
   _ -> error $ "x64_getLabelOfInstr: not a label instr"
 
-x64_mkJumpInstr = JMP . OpImm
+x64_mkJumpInstr = flip JMP Nothing . OpImm
 
 x64_renameBranchInstrLabel f instr = case instr of
-  JMP (OpImm i) -> JMP (OpImm (f i))
+  JMP (OpImm i) Nothing -> JMP (OpImm (f i)) Nothing
   JXX c i -> JXX c (f i)
   SWITCH op is -> SWITCH op (map f is)
   _ -> instr
 
+x64_getUseOfInstr instr = undefined
+x64_getDefOfInstr instr = undefined
+
+-- AT&T Syntax.
 data Instr
-  = LABEL  Operand
+  -- Pseudo instrs
+  = LABEL  Imm
+  | PROLOG
+  | EPILOG
   
   | MOV    Operand Operand
   | MOVZxQ OpWidth Operand Operand
@@ -99,22 +107,29 @@ data Instr
   | POP    Operand
 
   -- Branches
-  | JMP    Operand
+  | JMP    Operand (Maybe CallSiteInfo) -- callsite info is for tailcall
   | SWITCH Operand [Imm] -- jump to multiple basic blocks
   | JXX    Cond Imm      -- J/Jg/Jge/Jxx...
-  | CALL   Operand
-  | RET
+  | CALL   Operand CallSiteInfo -- The same as JMP
+  | RET    Bool -- True when returning the rax, or false otherwise
   deriving (Show)
+
+type CallSiteInfo = ( Bool       -- Needs result?
+                    , [Operand]  -- Arguments used (%rdi-%r9, mems..)
+                    )
 
 type Cond = MachOp
 
 ppr_instr :: Instr -> Doc
 ppr_instr i = case i of
-  LABEL o -> ppr o <> colon
-  SWITCH o lbls -> ppr_instr (JMP o) <+> text "# SWITCH =>" <+>
+  LABEL i -> pprImm i <> colon
+  SWITCH o lbls -> ppr_instr (JMP o Nothing) <+> text "# SWITCH =>" <+>
                    brackets (hcat (punctuate comma (map pprImm lbls)))
-  _ -> text pref <+> (hcat (punctuate comma (map ppr operands)))
+  _ -> text pref <+> (hcat (punctuate comma (map pprGasOperand operands)))
   where
+    pprGasOperand op = case op of
+      OpImm (IntVal i) -> char '$' <> integer i
+      _ -> ppr op
     (pref, operands) = disas i
 
     show_width w = case w of
@@ -153,8 +168,8 @@ ppr_instr i = case i of
       CMOV r o1 o2 -> ("cmov" ++ show_rel r, [o1, o2])
       PUSH   o1    -> ("push", [o1])
       POP    o1    -> ("pop",  [o1])
-      JMP    o1    -> ("jmp",  [o1])
+      JMP    o1 _  -> ("jmp",  [o1])
       JXX  r o1    -> ("j" ++ show_rel r,  [OpImm o1])
-      CALL   o1    -> ("call", [o1])
-      RET          -> ("ret", [])
+      CALL   o1 _  -> ("call", [o1])
+      RET    _     -> ("ret", [])
 

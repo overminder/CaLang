@@ -20,6 +20,7 @@ simplify g = run_pipeline passes
               removeUnreachableBlock]
 
 -- Set all local jump instr to reference their dest by block ids
+-- XXX: other instrs that refer to local labels are not renamed.
 renameLocalJump g = g'
   where
     labels = labelMap g

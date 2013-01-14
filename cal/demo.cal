@@ -4,6 +4,9 @@
 // Scope declaration
 export stg_apply_p;
 
+// Declare a function to use C's calling convention
+export "C" main;
+
 import printf, exit, __FrameDescr__, stg_collectGarbage;
 
 i64 stg_Thunk_p_info = {
@@ -53,9 +56,9 @@ labeldefault:
         // Implicit string constant
         // Undefined symbol can be used directly (Consider fix it?)
         // Call with vararg calling convention
-        call "vararg" printf("stg_apply_p: Arity %ld not implemented\n.",
+        call "C/vararg" printf("stg_apply_p: Arity %ld not implemented\n.",
                              arity);
-        call "noret" exit(1);
+        call "C/noret" exit(1);
     }
     // Return using default convention
     return 1;
@@ -75,7 +78,7 @@ stg_mkThunk_p(gcptr func, gcptr arg1) {
         // This should be straightforward...
         // We may also add stack walking functions for the collector
         // to use.
-        newThunk = call "" stg_collectGarbage(__FrameDescr__, 24);
+        newThunk = call stg_collectGarbage(__FrameDescr__, 24);
     }
     // Symbol address is taken using their name
     // If we want the content of a symbol address, we need to explicitly

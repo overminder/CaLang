@@ -1,22 +1,37 @@
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, FlexibleContexts,
+             UndecidableInstances #-}
 module Utils.Unique (
   Unique,
-  UniqueM,
+  MonadUnique,
+  liftU,
   mkUnique,
-  runUniqueM
+  UniqueM,
+  evalUniqueM
 ) where
 
-import Control.Monad.State
+import Control.Monad.Trans
 
 type Unique = Int
 
-type UniqueM = State Unique
+newtype UniqueM a = UniqueM { runUniqueM :: Unique -> (a, Unique) }
+
+evalUniqueM m = fst . runUniqueM m $ 0
+
+instance Monad UniqueM where
+  return a = UniqueM $ \s -> (a, s)
+  m >>= k  = UniqueM $ \s -> let (a, s') = runUniqueM m s
+                              in runUniqueM (k a) s'
+
+-- liftU
+class (Monad m) => MonadUnique m where
+  liftU :: UniqueM a -> m a
+
+instance MonadUnique UniqueM where
+  liftU = id
+
+instance (MonadUnique m, MonadTrans t, Monad (t m)) => MonadUnique (t m) where
+  liftU = lift . liftU
 
 mkUnique :: UniqueM Unique
-mkUnique = do
-  i <- get
-  put $ i + 1
-  return i
-
-runUniqueM :: UniqueM a -> a
-runUniqueM m = evalState m 0
+mkUnique = UniqueM $ \i -> (i, i+1)
 

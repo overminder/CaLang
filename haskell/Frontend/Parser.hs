@@ -78,9 +78,15 @@ pScope = pExport <|> pImport <|> pGlobalReg
 
 pExport = do
   reserved "export"
+  maybeConv <- (try strLit <|> return "")
+  let isC = case maybeConv of
+                   "" -> False
+                   "C" -> True
+                   _ -> error $ "pExport: not a valid export convention: " ++
+                                show maybeConv
   names <- sepBy ident comma
   semi
-  return . ScopeDef $ Export names
+  return . ScopeDef $ Export names isC
 
 pImport = do
   reserved "import"

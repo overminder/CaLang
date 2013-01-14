@@ -13,7 +13,9 @@ import qualified Data.Map as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Text.Dot
+import Text.PrettyPrint
 
+import Frontend.AST
 import Backend.Operand
 import qualified Utils.Unique as Unique
 import Utils.Class
@@ -22,6 +24,8 @@ type BlockId = Unique.Unique
 
 data FlowGraph a
   = MkGraph {
+    funcName :: String,
+    funcArgs :: [Reg],
     entryBlock :: BlockId,
     blockMap :: Map BlockId (BasicBlock a),
     predMap :: Map BlockId (Set BlockId),
@@ -54,13 +58,22 @@ type GraphBuilderM instr = StateT (GraphBuilder instr) CompilerM
 mkUnique :: forall a. GraphBuilderM a Unique.Unique
 mkUnique = lift Unique.mkUnique
 
-runGraphBuilderM :: GraphBuilderM instr a -> CompilerM (FlowGraph instr)
-runGraphBuilderM m = do
+runGraphBuilderM :: String -> [Reg] -> GraphBuilderM instr a ->
+                    CompilerM (FlowGraph instr)
+runGraphBuilderM name args m = do
   bdr <- execStateT m empty_builder
   return (gbGraph bdr) { labelMap = gbLabelMap bdr }
   where
     empty_builder = MkBuilder empty_graph empty_block Map.empty []
-    empty_graph = MkGraph (-1) Map.empty Map.empty Map.empty (error "lblMap")
+    empty_graph = MkGraph {
+      funcName = name,
+      funcArgs = args,
+      entryBlock = (-1),
+      blockMap = Map.empty,
+      predMap = Map.empty,
+      succMap = Map.empty,
+      labelMap = error "lblMap"
+    }
 
 empty_block = MkBlock (-1) [] Nothing []
 
@@ -175,8 +188,8 @@ addLabelMapping i b = do
   }
 
 -- Dot file support
-graphToDot :: Ppr instr => String -> FlowGraph instr -> Dot ()
-graphToDot name (MkGraph eb bm pm sm _) = do
+graphToDot :: Ppr instr => FlowGraph instr -> Dot ()
+graphToDot (MkGraph name args eb bm pm sm _) = do
   nodes <- liftM Map.fromList $ forM (Map.toList bm) $ \(bid, bb) -> do
     -- for each block, create a node
     nid <- mk_block_node bb
@@ -194,7 +207,7 @@ graphToDot name (MkGraph eb bm pm sm _) = do
         if bid /= eb
           then error $ "graphToDot: dangling block: " ++ show bid
           else pass
-  entry <- mk_node $ "Entry for <" ++ name ++ ">"
+  entry <- mk_node $ "Entry for <" ++ show (pprSignature name args) ++ ">"
   entry .->. (nodes Map.! eb)
   where
     mk_block_node (MkBlock bid is (Just ctrl) _)
@@ -205,4 +218,8 @@ graphToDot name (MkGraph eb bm pm sm _) = do
                           ("shape", "box"),
                           ("fontsize", "8.00")]
 
+
+pprSignature :: String -> [Reg] -> Doc
+pprSignature name args
+  = text name <> parens (hcat (punctuate comma (map pprReg args)))
 

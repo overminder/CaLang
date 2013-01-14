@@ -14,11 +14,11 @@ prepareCollection:
 	mov %r15, 0x20(%rsp)
 
 	# get frame pointer
-	mov sizeof_RootFinder(%rsp), %rax
+	mov (%rbp), %rax
 	mov %rax, 0x28(%rsp)
 
 	# get return address
-	mov sizeof_RootFinder+8(%rsp), %rax
+	mov 0x8(%rbp), %rax
 	mov %rax, 0x30(%rsp)
 
 	# Prepare for args and call into the real gc function

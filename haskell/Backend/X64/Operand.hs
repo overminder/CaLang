@@ -39,5 +39,3 @@ regs = map mk_reg (zip [0..] regNames)
     mk_reg (i, _) = Reg (MkRegId i) SignedOp W64 (MkGcFlag False)
 
 regNameToReg = Map.fromList (zip regNames regs)
-
-

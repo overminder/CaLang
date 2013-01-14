@@ -1,17 +1,22 @@
 #include "gcinterface.h"
 
+#define NUM_CALLEE_SAVED_REGS 5
+
 static void *gcMapTable;
 
+typedef struct {
+    long savedReg[NUM_CALLEE_SAVED_REGS];
+    void **framePtr;
+    void *retAddr;
+    GcMap *gcMap;
+} FrameDescr;
+
 struct RootFinderStruct {
-    long rbx;
-    long r12;
-    long r13;
-    long r14;
-    long r15;
-    void **rbp;
-    long retAddr;
-    GcMap *currGcMap;
-    long gcMapIter;
+    FrameDescr frame;
+    int8_t justLeftRuntime;
+    int8_t 
+    long stackIter;
+    long regIter;
 };
 
 void
@@ -19,12 +24,32 @@ CaLang_initializeGcMapTable(void) {
     gcMapTable = blahblah;
 }
 
+void
+CaLang_initializeRootFinder(RootFinder *rf) {
+    rt->justLeftRuntime = 1;
+}
+
 int
-CaLang_findGcMapFor(RootFinder *rf) {
-    GcMap *found = IntHashtable_Lookup(gcMapTable, rf->retAddr);
-    if (found) {
-        rf->currGcMap = found;
-        rf->gcMapIter = 0;
+CaLang_findNextFrame(RootFinder *rf) {
+    GcMap *gcmap;
+
+    if (!rf->justLeftRuntime) {
+        long i;
+
+        rf->frame.retAddr =
+            rf->frame.framePtr[rf->frame.gcMap->framePtrOffset + 1];
+        rf->frame.framePtr =
+            rf->frame.framePtr[rf->frame.gcMap->framePtrOffset];
+
+        for (i = 0; i < NUM_CALLEE_SAVED_REGS; ++i) {
+            long offset = 
+        }
+    }
+    gcmap = IntHashtable_Lookup(gcMapTable, rf->frame.retAddr);
+    if (gcmap) {
+        rf->frame.gcMap = gcmap;
+        rf->stackIter = 0;
+        rf->regIter = 0;
         return 1;
     }
     else {
@@ -32,16 +57,30 @@ CaLang_findGcMapFor(RootFinder *rf) {
     }
 }
 
+static findNextPointerInReg(RootFinder *rf, void ***out) {
+    while (1) {
+        switch (rf->regIter) {
+        case 0:
+            if rf->currGcMap
+        case 1:
+        case 2:
+        case 3:
+        case 4:
+        case 5:
+        }
+    }
+}
+
 int
 CaLang_findNextPointerInFrame(RootFinder *rf, void ***out) {
     GcMap *map = rf->currGcMap;
-    long iter = rf->gcMapIter;
+    long iter = rf->stackIter;
     if (iter >= map->numPtrs) {
-        return 0;
+        return findNextPointerInReg(rf, out);
     }
     else {
         *out = rf->rbp + map->ptrOffsets[iter++];
-        rf->gcMapIter = iter;
+        rf->stackIter = iter;
         return 1;
     }
 }

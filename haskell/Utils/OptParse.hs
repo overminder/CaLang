@@ -3,6 +3,7 @@ module Utils.OptParse (
   parseOpt
 ) where
 
+import System.Exit
 import Control.Monad.State
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -58,5 +59,5 @@ parseOpt descrs = mkParser (descrs ++ [BoolOption ["-h", "--help"] help])
             putStrLn (unwords (map (++" STRING") names))
           StringOption _ -> do
             putStrLn "And positional options."
-      return m
+      exitFailure
 

@@ -92,10 +92,12 @@ data CallingConv
   = TailCall
   | Vararg
   | Noret
+  | CCall
   deriving (Show, Eq, Ord)
 
 callingConvNames = Map.fromList [("tail", TailCall),
                                  ("vararg", Vararg),
+                                 ("C", CCall),
                                  ("noret", Noret)]
 callingConvToName = Map.fromList (map swap (Map.toList callingConvNames))
 parseCallingConv :: String -> Maybe [CallingConv]
@@ -104,9 +106,9 @@ parseCallingConv s = mapM parse_one (split "/" s)
     parse_one s = Map.lookup s callingConvNames
 
 -- Commonly used
-newVReg :: StorageType -> UniqueM Operand
+newVReg :: MonadUnique m => StorageType -> m Operand
 newVReg (kls, width, gc) = do
-  i <- mkUnique
+  i <- liftU mkUnique
   return . OpReg $ VReg (MkRegId i) kls width gc
 
 newTempLabel :: String -> UniqueM Operand

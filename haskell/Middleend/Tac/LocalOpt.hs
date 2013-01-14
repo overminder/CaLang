@@ -70,6 +70,8 @@ runOpt g = do
     b' <- run_block b
     return (bid, (fmap strip_info b'))
   return $ MkGraph {
+    funcName = funcName g,
+    funcArgs = funcArgs g,
     entryBlock = entryBlock g,
     blockMap = Map.fromList blocks',
     predMap = predMap g,

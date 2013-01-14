@@ -17,8 +17,8 @@ register，等等等等。。
 ### Calling Convention
 
 System V x86\_64的spec（下称sysV）里说，1st-6th的int arg通过reg来传递，
-不知道多少float arg通过xmm来传递，其他的通过stack来传递，可是通过stack来
-传递的arg居然属于caller！另外，return address是最后push上去的。
+不知道多少float arg通过xmm来传递，其他的通过stack来传递，
+可是通过stack来传递的arg居然属于caller！另外，return address是最后push上去的。
 这样一来，如果想要实现proper tailcall，那么只要caller和callee的signature不同，
 我们都必须让caller在jump之前调整一下return address。
 

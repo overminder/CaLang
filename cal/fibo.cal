@@ -1,4 +1,5 @@
-export main;
+export "C" main;
+export fibo;
 
 import atoi, printf;
 
@@ -7,14 +8,14 @@ main(i64 argc, i64 argv) {
     i64 res;
 
     if argc < 2 {
-        n = call "" atoi(i64[argv + 8]);
+        n = call atoi(i64[argv + 8]);
     }
     else {
         n = 30;
     }
 
     res = call fibo(n);
-    call "vararg" printf("fibo(%ld) => %ld\n", n, res);
+    call "C/vararg" printf("fibo(%ld) => %ld\n", n, res);
     return 0;
 }
 

@@ -65,15 +65,16 @@ munchStmt s = case s of
       Just e -> do
         r <- munchExpr e
         emit (MOV r (OpReg (PReg returnReg)))
-      Nothing -> return ()
-    emit RET
+        emit (RET True)
+      Nothing ->
+        emit (RET False)
   SJump dest -> case dest of
     EVar lbl@(OpImm _) -> emit (JMP lbl)
     _ -> do
       r <- munchExpr dest
       emit (JMP r)
   SExpr e -> munchExpr e >> return ()
-  SLabel lbl@(OpImm _) -> emit (LABEL lbl)
+  SLabel lbl@(OpImm imm) -> emit (LABEL imm)
   SSwitch e lbls (Just tab) -> do
     r <- munchExpr (EUnary (MRef i64)
                            (EBinary AAdd

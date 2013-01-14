@@ -96,7 +96,7 @@ data Data a
   deriving (Show, Functor)
 
 data Scope
-  = Export [Name]
+  = Export [Name] Bool -- names and whether it uses C's callingconv
   | Import [Name]
   | GlobalReg Name Reg
   deriving (Show)
@@ -151,9 +151,13 @@ pprStorageType ty = case ty of
 pprData (LiteralData b lit) = pprBinding b <+> char '=' <+>
                               pprLit lit <> semi
 
+pprExportType conv = case conv of
+  True -> text . show $ "C"
+  False -> empty
+
 pprScope s = case s of
-  Export names -> text "export" <+>
-                  hcat (punctuate comma (map text names)) <> semi
+  Export names conv -> text "export" <+> pprExportType conv <+>
+                       hcat (punctuate comma (map text names)) <> semi
   Import names -> text "import" <+>
                   hcat (punctuate comma (map text names)) <> semi
   GlobalReg name r -> text "register" <+> text name <+>

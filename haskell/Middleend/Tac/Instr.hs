@@ -38,7 +38,7 @@ data Instr
   | UNROP  MachOp Reg Operand
 
   | LOAD  OpWidth Reg Operand -- dest <- [src]
-  | STORE OpWidth Reg Operand -- [src] <- dest
+  | STORE OpWidth Reg Operand -- [dest] <- src
 
   | CASEJUMP      Operand [Imm]
   | RET           (Maybe Operand)

@@ -90,7 +90,7 @@ scanToplevel t = case t of
   FuncDef (Func name _ _) -> newGlobal u32 name
   DataDef (LiteralData (ty, name) _) -> newGlobal ty name
   ScopeDef scope -> case scope of
-    Export names -> mapM_ newExport names
+    Export names conv -> mapM_ newExport names
     Import names -> mapM_ (newGlobal i64) names
     GlobalReg name reg -> newGlobalReg name (OpReg reg)
 

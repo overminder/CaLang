@@ -13,15 +13,16 @@ import Text.PrettyPrint
 import Frontend.AST
 import Frontend.Parser
 import Frontend.Rename
-import qualified Frontend.Simplify as FrSim
-import qualified Middleend.Tac.Munch as TacMun
-import Middleend.FlowGraph.Builder
-import qualified Middleend.FlowGraph.Simplify as GrSim
-import Middleend.Tac.Instr
-import Middleend.Tac.LocalOpt
+import qualified Frontend.Simplify as Sim
+import qualified Middleend.FlowGraph.Builder as Fg
+import qualified Middleend.FlowGraph.Simplify as Fg
+import qualified Middleend.Tac.Munch as Tac
+import qualified Middleend.Tac.Instr as Tac
+import qualified Middleend.Tac.LocalOpt as Tac
 import Backend.Operand
---import Backend.HOST_ARCH.Munch
---import Backend.HOST_ARCH.Instr
+--import qualified Backend.HOST_ARCH.Munch as Arch
+--import qualified Backend.HOST_ARCH.Instr as Arch
+import qualified Backend.HOST_ARCH.OptZero.Munch as Arch_O
 import Utils.Unique
 import Utils.Class
 import Utils.OptParse
@@ -40,6 +41,7 @@ data OutputOpt
   | OutputRawInstr
   | OutputRawDot
   | OutputLocOptDot
+  | OutputOptZero
 
 parseDriverOpt args = parseOpt options args emptyOption
   where
@@ -50,6 +52,7 @@ parseDriverOpt args = parseOpt options args emptyOption
               , BoolOption ["--instr"] (setOutputLevel OutputRawInstr)
               , BoolOption ["--dot"] (setOutputLevel OutputRawDot)
               , BoolOption ["--locopt"] (setOutputLevel OutputLocOptDot)
+              , BoolOption ["--O0"] (setOutputLevel OutputOptZero)
               , NamedStringOption ["-o"] setOutput
               , StringOption setInput
               ]
@@ -64,11 +67,12 @@ parseDriverOpt args = parseOpt options args emptyOption
         h <- openFile path WriteMode
         return $ opt { optOutput = h }
 
-runAllPasses s = runUniqueM $ do
+runAllPasses s = evalUniqueM $ do
   let rdrProg = runParsePass s
   frRes <- runFrontendPass rdrProg
   grRes <- runGraphPass frRes
-  return (frRes, grRes)
+  oOs <- runOptZeroPass frRes
+  return (frRes, grRes, oOs)
 
 driverMain = do
   args <- getArgs
@@ -79,7 +83,7 @@ driverMain = do
     let result = runAllPasses src
     outputPass result
 
-outputPass ((prog, _, fs), (iss, rgs, logs)) = do
+outputPass ((prog, _, fs), (iss, rgs, logs), optZeros) = do
   h <- asks optOutput
   level <- asks optOutputLevel
   case level of
@@ -92,14 +96,21 @@ outputPass ((prog, _, fs), (iss, rgs, logs)) = do
         mapM_ (lift . hPutStrLn h . show . ppr) is
     OutputRawDot -> output_graphs fs rgs
     OutputLocOptDot -> output_graphs fs logs
+    --OutputOptZero -> output_optZeros optZeros
 
     where
     output_graphs fs gs = do
         h <- asks optOutput
         dots <- forM (zip fs gs) $ \(f, g) -> do
-          return $ graphToDot (show (pprSignature f)) g
+          return $ Fg.graphToDot g
         let combined = sequence (map scope dots)
         lift . hPutStrLn h . showDot $ combined
+
+    output_optZeros insnss = do
+      h <- asks optOutput
+      forM_ insnss $ \(name, insns) -> do
+        lift . hPutStrLn h $ show (ppr name) ++ ":"
+        lift . hPutStrLn h . show . vcat . map ppr $ insns
 
 runParsePass :: String -> Program String
 runParsePass = readProgram
@@ -110,15 +121,24 @@ runFrontendPass :: Program String ->
                             [Func Operand])
 runFrontendPass rdrProg = do
   (rnDatas, rnFuncs, exports, clobRegs) <- runRenameM (rename rdrProg)
-  (simDatas, simFuncs) <- FrSim.runSimplifyM (FrSim.simplify rnDatas rnFuncs)
+  (simDatas, simFuncs) <- Sim.runSimplifyM (Sim.simplify rnDatas rnFuncs)
   return (rdrProg, (exports, clobRegs, simDatas), simFuncs)
 
 runGraphPass (_, _, simFuncs) = do
-  insnss <- mapM (TacMun.runMunchM . TacMun.munch) simFuncs
-  rawGraphs <- mapM (runGraphBuilderM . buildGraph) insnss
-  let simGraphs = map GrSim.simplify rawGraphs
-  locOptGrs <- mapM runOpt simGraphs
+  (insnss, rawGraphs) <- liftM unzip $ mapM mkInstrAndGraph simFuncs
+  let simGraphs = map Fg.simplify rawGraphs
+  locOptGrs <- mapM Tac.runOpt simGraphs
   return (insnss, simGraphs, locOptGrs)
+  where
+  mkInstrAndGraph (Func (OpImm (NamedLabel name)) args body) = do
+    insns <- Tac.runMunchM . Tac.munch $ body
+    let regArgs = map (unReg . snd) args
+    graph <- Fg.runGraphBuilderM name regArgs . Fg.buildGraph $ insns
+    return (insns, graph)
+  unReg (OpReg r) = r
+
+runOptZeroPass (_, _, simFuncs) = do
+  undefined
 
 pprSignature (Func name args _)
   = ppr name <> (parens (hcat (punctuate comma (map pprBinding args))))
