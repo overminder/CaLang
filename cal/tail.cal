@@ -1,3 +1,6 @@
+#include "stdlib.cal"
+
+export "C" main;
 
 sumTail(i64 s, i64 i) {
     if (i < 1) {
@@ -6,5 +9,14 @@ sumTail(i64 s, i64 i) {
     else {
         call "tail" sumTail(s + i, i - 1);
     }
+}
+
+main(i64 argc, i64 argv) {
+    i64 s, n;
+    n = call getArg(argc, argv, 12345);
+    s = call sumTail(0, n);
+
+    call "C/vararg" printf("sumTail(0, %ld) = %ld\n", n, s);
+    return 0;
 }
 

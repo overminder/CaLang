@@ -5,12 +5,17 @@ module Driver (
 import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.Reader
+import qualified Data.Foldable as Foldable
+import Data.Set (Set)
+import qualified Data.Set as Set
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.List (zipWith4)
 import System.IO
 import System.Environment
 import Text.Dot
 import Text.PrettyPrint
+import Language.Preprocessor.Cpphs
 
 import Frontend.AST
 import Frontend.Parser
@@ -34,8 +39,11 @@ import Utils.OptParse
 data Option
   = Option {
     optInput :: Handle,
+    optInputFile :: String,
     optOutput :: Handle,
-    optOutputLevel :: OutputOpt
+    optOutputFile :: String,
+    optOutputLevel :: OutputOpt,
+    runCpp :: Bool
   }
 
 data OutputOpt
@@ -53,10 +61,12 @@ data OutputOpt
   | OutputOptZeroInterf
   | OutputOptZeroColor
   | OutputOptZeroRegAlloc
+  | OutputOptZeroPlatGraph
+  | OutputOptZero
 
 parseDriverOpt asimGs = parseOpt options asimGs emptyOption
   where
-    emptyOption = Option stdin stdout OutputNothing
+    emptyOption = Option stdin "<stdin>" stdout "<stdout>" OutputNothing False
     setOutputLevel wat = \x -> return $ x { optOutputLevel = wat }
     options = [ BoolOption ["--rdrprog"] (setOutputLevel OutputRdrProg)
               , BoolOption ["--frsim"] (setOutputLevel OutputFrSim)
@@ -68,6 +78,9 @@ parseDriverOpt asimGs = parseOpt options asimGs emptyOption
               , BoolOption ["--O0-interf"] (setOutputLevel OutputOptZeroInterf)
               , BoolOption ["--O0-color"] (setOutputLevel OutputOptZeroColor)
               , BoolOption ["--O0-ral"] (setOutputLevel OutputOptZeroRegAlloc)
+              , BoolOption ["--O0-plat"] (setOutputLevel OutputOptZeroPlatGraph)
+              , BoolOption ["--O0"] (setOutputLevel OutputOptZero)
+              , BoolOption ["--cpp"] (\x -> return $ x { runCpp = True })
               , NamedStringOption ["-o"] setOutput
               , StringOption setInput
               ]
@@ -86,7 +99,7 @@ runAllPasses s = evalUniqueM $ do
   let rdrProg = runParsePass s
   frRes <- runFrontendPass rdrProg
   grRes <- runGraphPass frRes
-  oOs <- runOptZeroPass grRes
+  oOs <- runOptZeroPass frRes grRes
   return (frRes, grRes, oOs)
 
 driverMain :: IO ()
@@ -96,18 +109,32 @@ driverMain = do
   flip runReaderT opt $ do
     h <- asks optInput
     src <- lift $ hGetContents h
-    let result = runAllPasses src
+    wantCpp <- asks runCpp
+    inputPath <- asks optInputFile
+    cppSrc <- if wantCpp
+                then let cppOption = defaultBoolOptions { ansi = True
+                                                        , locations = False
+                                                        }
+                      in do
+                        cppd' <- lift $ cppIfdef "/dev/null" [] ["."]
+                                        cppOption src
+                        lift $ macroPass [] cppOption cppd'
+                else return src
+    --lift $ hPutStr stderr cppSrc
+    let result = runAllPasses cppSrc
     outputPass result
+    h <- asks optOutput
+    lift $ hClose h
 
-outputPass ( (prog, _, fs)
+outputPass ( (prog, (exports, clobs, simDatas), fs)
            , (iss, simGs, locOptGs)
-           , (natGs, lvNatGs, interfGs, colors, ralGs)) = do
+           , (natGs, lvNatGs, interfGs, colors, ralGs, platNatGs)) = do
   h <- asks optOutput
   level <- asks optOutputLevel
   case level of
     OutputNothing -> return ()
     OutputRdrProg -> lift . hPutStrLn h . show . pprProgram $ prog
-    OutputFrSim -> mapM_ (lift . putStrLn . show . pprFunc) fs
+    OutputFrSim -> mapM_ (lift . hPutStrLn h . show . pprFunc) fs
     OutputRawInstr -> do
       forM_ (zip fs iss) $ \(f, is) -> do
         lift . hPutStrLn h $ "# Entry for <" ++ show (pprSignature f) ++ ">"
@@ -124,6 +151,11 @@ outputPass ( (prog, _, fs)
              in Ral.graphToDot graph showVertex
       lift . hPutStrLn h . showDot . combine_dots $ dots
     OutputOptZeroRegAlloc -> output_flowGraphs ralGs
+    OutputOptZeroPlatGraph -> output_flowGraphs platNatGs
+    OutputOptZero -> do
+      output_asm_export exports
+      output_asm_data simDatas
+      output_asm_code platNatGs
 
     where
     combine_dots :: [Dot ()] -> Dot ()
@@ -140,6 +172,41 @@ outputPass ( (prog, _, fs)
       h <- asks optOutput
       let dots = map Ral.rawGraphToDot gs
       lift . hPutStrLn h . showDot . combine_dots $ dots
+
+    output_asm_export exports = do
+      h <- asks optOutput
+      forM_ exports $ \s -> do
+        lift . hPutStrLn h $ ".globl " ++ s
+
+    output_asm_data datas = do
+      h <- asks optOutput
+      forM_ datas $ \(LiteralData (_, label) lit) -> do
+        lift . hPutStrLn h $ ".align 16"
+        lift . hPutStrLn h $ ".data"
+        lift . hPutStrLn h $ show (ppr label) ++ ":"
+        lift . hPutStrLn h . show_lit $ lit
+
+    show_lit lit = case lit of
+      LInt i -> ".quad " ++ show i
+      LChr c -> ".byte " ++ show c
+      LStr s -> ".string " ++ show s
+      LFlo d -> ".double " ++ show d
+      LSym (OpImm (NamedLabel s)) -> ".quad " ++ s
+      LArr lits -> unlines (map show_lit lits)
+
+    output_asm_code graphs = do
+      h <- asks optOutput
+      let writeLn = lift . hPutStrLn h
+      forM_ graphs $ \g -> do
+        writeLn $ ".align 16"
+        writeLn $ ".text"
+        writeLn $ Fg.funcName g ++ ":"
+        let blocks = getBlockTrace (Fg.blockTrace g) (Fg.blockMap g)
+        forM_ blocks $ \b -> do
+          writeLn $ show (pprImm (BlockLabel (Fg.blockId b))) ++ ":"
+          Foldable.mapM_ (writeLn . show . ppr) b
+      where
+        getBlockTrace ids bmap = map (bmap Map.!) ids
 
 runParsePass :: String -> Program String
 runParsePass = readProgram
@@ -166,13 +233,18 @@ runGraphPass (_, _, simFuncs) = do
     return (insns, graph)
   unReg (OpReg r) = r
 
-runOptZeroPass (_, simGs, _) = do
+runOptZeroPass (_, (_, clobs, _), _) (_, simGs, _) = do
   let natGs = map (Arch.evalMunchM . Arch.munchGraph) simGs
       lvNatGs = map Ral.iterLiveness natGs
   interfGs <- mapM Ral.buildGraph lvNatGs
   let colors = map (Ral.color generalRegs) interfGs
       ralGs = zipWith3 Ral.materialize colors interfGs lvNatGs
-  return (natGs, lvNatGs, interfGs, colors, ralGs)
+  platNatGs  <- sequence (zipWith4 Arch.evalFrameM
+                                   ralGs
+                                   (repeat clobs)
+                                   (map (Set.fromList . Map.elems) colors)
+                                   (repeat Arch.genPlatDepCode))
+  return (natGs, lvNatGs, interfGs, colors, ralGs, platNatGs)
 
 pprSignature (Func name asimGs _ _)
   = ppr name <> (parens (hcat (punctuate comma (map pprBinding asimGs))))

@@ -139,7 +139,7 @@ x64_getUseOfInstr instr = case instr of
 
   AND      o1 o2 -> mkUseOfSrc o1 ++ mkUseOfSrc  o2 ++ mkUseOfDest o2
   OR       o1 o2 -> mkUseOfSrc o1 ++ mkUseOfSrc  o2 ++ mkUseOfDest o2
-  XOR      o1 o2 -> if o1 == o2
+  XOR      o1 o2 -> if False --o1 == o2
                       then []
                       else mkUseOfSrc o1 ++ mkUseOfDest o2
   NOT      o1    -> mkUseOfSrc o1 ++ mkUseOfDest o1
@@ -254,11 +254,18 @@ ppr_instr i = case i of
   EPILOG  -> text "epilog"
   SWITCH o lbls -> ppr_instr (JMP o Nothing) <+> text "# SWITCH =>" <+>
                    brackets (hcat (punctuate comma (map pprImm lbls)))
-  _ -> text pref <+> (hcat (punctuate comma (map pprGasOperand operands)))
+  _ -> text pref <+> (hcat (punctuate comma (map (pprGasOperand i) operands)))
   where
-    pprGasOperand op = case op of
-      OpImm (IntVal i) -> char '$' <> integer i
+    pprGasOperand i op = case op of
+      OpImm imm -> prefix <> pprImm imm
       _ -> ppr op
+      where
+        prefix = case i of
+          JMP  _ _ -> empty
+          JXX  _ _ -> empty
+          CALL _ _ -> empty
+          _        -> char '$'
+
     (pref, operands) = disas i
 
     show_width w = case w of

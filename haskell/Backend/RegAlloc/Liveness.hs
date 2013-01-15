@@ -1,10 +1,13 @@
 module Backend.RegAlloc.Liveness (
   iterLiveness,
   Liveness(..),
+  mkEmptyLiveness,
 ) where
 
+import Prelude hiding (foldr)
 import Data.Set (Set)
 import qualified Data.Set as Set
+import Data.Foldable
 import Data.Traversable
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -66,7 +69,8 @@ iterLiveness rawGraph = go exitBlockIds initialLivenessGraph
                       succLiveIn = foldr Set.union Set.empty (
                                      map liveInOfBlock succBlocks)
                       (b', changed) = recalculateBlock b succLiveIn
-                   in if changed
+                   in if changed || (null (Fg.instrList b))
+                      -- Propagate anyways if b is empty
                         then go (rest ++ (Set.toList
                                            (Fg.getPredBlockIds bid g)))
                                 (Fg.putBlock b' g)
@@ -88,7 +92,8 @@ getDefUse liveness@(Liveness {instr=i}) = liveness {
 }
 
 liveInOfBlock :: Fg.BasicBlock (Liveness a) -> Set Reg
-liveInOfBlock = liveIn . head . Fg.instrList
+liveInOfBlock b = case Fg.instrList b ++ toList (Fg.controlInstr b) of
+  x:xs -> liveIn x
 
 recalculateBlock :: Fg.BasicBlock (Liveness a) ->
                     Set Reg -> (Fg.BasicBlock (Liveness a), Bool)

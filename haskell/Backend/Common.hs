@@ -9,6 +9,8 @@ module Backend.Common (
   StorageType,
   GcFlag(..),
   RegId(..),
+
+  -- Instr Operands
   Reg(..), PhysicalReg(..), VirtualReg(..),
   Imm(..),
   Addr(..),
@@ -22,7 +24,8 @@ module Backend.Common (
   -- Used by regalloc
   mkUseOfSrc, mkDefOfSrc,
   mkUseOfDest, mkDefOfDest,
-  replaceRegInOp,
+  replaceRegInOp, copyGcFlag,
+
 ) where
 
 import Control.Arrow
@@ -74,7 +77,7 @@ instance Register VirtualReg where
   isVirtualReg _ = True
   mkRegFromString _ = undefined
   getRegName (VirtualReg (MkRegId i, kls, w, gcf))
-    = '%':show i
+    = "%" ++ (if getGcFlag gcf then "gcptr" else "") ++ show i
   getClassOfReg (VirtualReg (_, kls, w, gcf)) = (kls, w, gcf)
 
 -- base + disp + index(r * i)
@@ -250,4 +253,13 @@ replaceRegInOp f op = case op of
   OpImm _ -> op
   OpAddr (MkAddr mbBase mbIndex disp) ->
     OpAddr (MkAddr (fmap f mbBase) (fmap (first f) mbIndex) disp)
+
+copyGcFlag :: Reg -> Reg -> Reg
+copyGcFlag from to = to'
+  where
+    gcf = case from of
+            RegV (VirtualReg (_, _, _, gcf)) -> gcf
+    to' = case to of
+            RegP (PhysicalReg (rid, w, kls, _)) ->
+              RegP (PhysicalReg (rid, w, kls, gcf))
 

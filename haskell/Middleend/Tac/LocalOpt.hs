@@ -72,6 +72,7 @@ runOpt g = do
     funcName = funcName g,
     funcArgs = funcArgs g,
     funcConv = funcConv g,
+    blockTrace = blockTrace g,
     entryBlock = entryBlock g,
     blockMap = Map.fromList blocks',
     predMap = predMap g,
@@ -214,6 +215,7 @@ doValueNumbering instr = case instr of
     o' <- mapM findCurrAlias o
     return $ RET o'
   PROLOG -> return instr
+  EPILOG -> return instr
   JIF cond (o2, o3) ifTrue ifFalse -> do
     o2' <- findCurrAlias o2
     o3' <- findCurrAlias o3
@@ -287,6 +289,7 @@ gatherAvailExpr instr = do
     UNROP uop r1 o2 -> do
       addAvailExpr (Unary uop o2) r1
     PROLOG -> pass
+    EPILOG -> pass
     RET _ -> pass
     JIF _ _ _ _ -> pass
     JMP _ -> pass
@@ -356,6 +359,7 @@ doCSE instr = case instr of
       Nothing -> return instr
   RET _ -> return instr
   PROLOG -> return instr
+  EPILOG -> return instr
   JIF _ _ _ _ -> return instr
   JMP _ -> return instr
   LOAD _ _ _ -> return instr
@@ -388,6 +392,7 @@ doAliasProp i = case i of
     mbr' <- mapM tryDerefAlias mbr
     return $ RET mbr'
   PROLOG -> return PROLOG
+  EPILOG -> return EPILOG
   JIF cond (o2, o3) ifTrue ifFalse -> do
     o2' <- tryDerefAlias o2
     o3' <- tryDerefAlias o3

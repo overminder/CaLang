@@ -1,0 +1,12 @@
+
+import printf, atoi, exit;
+
+getArg(i64 argc, i64 argv, i64 default) {
+    if argc == 2 {
+        call "C/tail" atoi(i64[argv + 8]);
+    }
+    else {
+        return default;
+    }
+}
+

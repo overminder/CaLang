@@ -1,0 +1,9 @@
+
+gcfunc(gcptr a) {
+    i64 b;
+
+    b = a + 1;
+
+    return b;
+}
+

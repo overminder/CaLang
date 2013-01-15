@@ -56,6 +56,10 @@ semi = T.semi lexer
 comma = T.comma lexer
 ws = T.whiteSpace lexer
 
+manyStrLit = do
+  lits <- many1 strLit
+  return (concat lits)
+
 -- Syntax defs
 pProgram = ws >> many pToplevel
 
@@ -250,7 +254,7 @@ pNumLit = liftM mk_num numLit
       Right d -> LFlo d
 
 pChrLit = liftM LChr chrLit
-pStrLit = liftM LStr strLit
+pStrLit = liftM LStr manyStrLit
 pArrLit = liftM LArr (braces (sepBy pLit comma))
   where
     p_integral_lit = pNumLit <|> pChrLit <|> pStrLit <|> pSymLit

@@ -12,13 +12,14 @@ import qualified Data.Map as Map
 import qualified Middleend.Tac.Instr as Tac
 import qualified Middleend.FlowGraph.Builder as Fg
 import Backend.Operand
-import Backend.X64.OptZero.Frame
+import qualified Backend.X64.OptZero.Frame as F
 import Backend.X64.Instr
 import Utils.Unique
 
 data MunchState
   = MunchState {
-    instrForNextBlock :: Maybe Instr
+    instrForNextBlock :: Maybe Instr,
+    flowGraph :: Fg.FlowGraph Tac.Instr
   }
 
 type MunchM = State MunchState
@@ -27,7 +28,8 @@ evalMunchM :: MunchM a -> a
 evalMunchM = (`evalState` emptyState)
   where
     emptyState = MunchState {
-      instrForNextBlock = Nothing
+      instrForNextBlock = Nothing,
+      flowGraph = undefined
     }
 
 modifyInstrForNextBlock f = modify $ \st -> st {
@@ -35,9 +37,10 @@ modifyInstrForNextBlock f = modify $ \st -> st {
 }
 
 munchGraph :: Fg.FlowGraph Tac.Instr -> MunchM (Fg.FlowGraph Instr)
-munchGraph g@(Fg.MkGraph name args isC entry blocks pm sm lm) = do
+munchGraph g@(Fg.MkGraph name args isC entry _ blocks pm sm lm) = do
   -- Here we build a trace of the flow since Call may need to
   -- emit mov %rax, %dest to the next block.
+  modify $ \st -> st { flowGraph = g }
   let blockTrace = map (blocks Map.!) (Fg.mkTrace g)
   munchedBlocks <- forM blockTrace $ \block -> do
     instrs <- liftM2 (++) getAndClearPrevInstr
@@ -49,7 +52,7 @@ munchGraph g@(Fg.MkGraph name args isC entry blocks pm sm lm) = do
       Fg.blockLabels = Fg.blockLabels block
     }
   let newBlockMap = Map.fromList (map mkBlockPair munchedBlocks)
-  return $ Fg.MkGraph name args isC entry newBlockMap pm sm lm
+  return $ Fg.MkGraph name args isC entry (Fg.mkTrace g) newBlockMap pm sm lm
   where
     mkBlockPair b = (Fg.blockId b, b)
     getAndClearPrevInstr = do
@@ -68,7 +71,16 @@ munchInstr :: Tac.Instr -> WriterT [Instr] MunchM ()
 munchInstr tac = case tac of
   Tac.LABEL i -> error $ "munchInstr: labels should not appear"
 
-  Tac.PROLOG -> emit PROLOG 
+  Tac.PROLOG -> do
+    emit PROLOG 
+    isC <- gets (Fg.funcConv . flowGraph)
+    args <- gets (Fg.funcArgs . flowGraph)
+    let mkArg = if isC
+                  then mkCArg
+                  else mkCaLangArg
+    (argLocs, _) <- mkArg args
+    forM_ (zip args argLocs) $ \(arg, loc) -> do
+      emit $ MOV loc (OpReg arg)
 
   Tac.EPILOG -> emit EPILOG
 
@@ -76,7 +88,7 @@ munchInstr tac = case tac of
     emit (MOV src (OpReg dest))
 
   Tac.BINOP op dest (OpReg lhs) (OpReg rhs) -> case op of
-    AAdd -> emit (LEA (OpAddr (mkBaseIndexAddr lhs rhs)) (OpReg dest))
+    AAdd -> emit (LEA (OpAddr (F.mkBaseIndexAddr lhs rhs)) (OpReg dest))
     ASub -> do
       emit (MOV (OpReg lhs) (OpReg dest))
       emit (SUB (OpReg rhs) (OpReg dest))
@@ -87,7 +99,7 @@ munchInstr tac = case tac of
     _ -> undefined
 
   Tac.LOAD width dest (OpReg src) -> do
-    let op1 = OpAddr (mkBaseAddr src)
+    let op1 = OpAddr (F.mkBaseAddr src)
         op2 = OpReg dest
     case width of
       W64 -> emit (MOV op1 op2)
@@ -95,7 +107,7 @@ munchInstr tac = case tac of
 
   Tac.STORE width dest (OpReg src) -> do
     let op1 = OpReg src
-        op2 = OpAddr (mkBaseAddr dest)
+        op2 = OpAddr (F.mkBaseAddr dest)
     case width of
       W64 -> emit (MOV op1 op2)
       _ -> emit (MOVSxQ width op1 op2)
@@ -109,8 +121,18 @@ munchInstr tac = case tac of
       emit (RET True)
 
   Tac.JIF cond (lhs, rhs) trueLabel _ -> do
-    emit (CMP rhs lhs)
-    emit (JXX cond trueLabel)
+    emit (CMP lhs rhs)
+    -- XXX WHY?
+    -- Should be some bug in Tac's munch code.
+    let cond' = case cond of
+                  RNe -> REq
+                  REq -> RNe
+                  RLt -> RLe
+                  RLe -> RLt
+                  RGe -> RGt
+                  RGt -> RGe
+                  _ -> cond
+    emit (JXX cond' trueLabel)
 
   Tac.JMP op -> do
     emit (JMP (OpImm op) Nothing)
@@ -142,7 +164,7 @@ addToNextBlock instr = modifyInstrForNextBlock $ \mbi -> case mbi of
 
 assertArgLength args = if length args > 6 then error "too many args" else args
 mkCArg args = do
-  return $ (zipWith const argOps (assertArgLength args), [])
+  return $ (zipWith const F.argRegs (assertArgLength args), [])
 mkCVararg args = do
   (locs, _) <- mkCArg args
   return (locs, [XOR (OpReg eax) (OpReg eax)])

@@ -109,7 +109,7 @@ renameToplevel t = case t of
   FuncDef f@(Func _ _ _ _) ->
     liftM (pure . FuncDef) (renameFunc f)
   DataDef _ -> do
-    dctLookup <- liftM (flip resolveGlobal) get
+    dctLookup <- gets (flip resolveGlobal)
     let f s = case dctLookup s of
                 Just v -> v
                 Nothing -> error $ "Rename.renameToplevel: " ++
@@ -128,7 +128,7 @@ renameFunc (Func name args body _) = do
   runFuncM $ do
     -- 1st pass
     args' <- forM args $ \(ty, name) -> do
-      op <- lift $ newRegV ty
+      op <- newRegV ty
       addLocal name op
       return (ty, op)
     scanStmt body
@@ -161,8 +161,8 @@ addLocal name op = modify $ \st -> st {
 
 mkNameResolver :: FuncM (Name -> Operand)
 mkNameResolver = do
-  localDct <- liftM localNames get
-  globalDct <- lift $ liftM rnGlobals get
+  localDct <- gets localNames
+  globalDct <- lift $ gets rnGlobals
   let f name = case Map.lookup name localDct of
                  Just op -> op
                  Nothing -> do
@@ -183,7 +183,7 @@ mkNameResolver = do
 scanStmt :: Stmt Name -> FuncM ()
 scanStmt s = case s of
   SVarDecl bs -> forM_ bs $ \(ty, name) -> do
-    op <- lift $ newRegV ty
+    op <- newRegV ty
     addLocal name op
   SLabel name -> do
     label <- newTempLabel name

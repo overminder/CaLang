@@ -1,6 +1,4 @@
 module Backend.X64.Regs (
-  argRegs,
-  returnReg,
   generalRegs,
 
   rax, rcx, rdx, rbx, rdi, rsi, rsp, rbp, r8,
@@ -18,9 +16,9 @@ import Backend.Common
 instance Register PhysicalReg where
   isPhysicalReg _ = True
   mkRegFromString ('%':name) = fmap unRegP (Map.lookup name regNameToReg)
-  getRegName (PhysicalReg (MkRegId i, _, w, _)) = case w of
-    W64 -> '%':quadRegNames !! i
-    W32 -> '%':dwordRegNames !! i
+  getRegName (PhysicalReg (MkRegId i, _, w, gcf)) = case w of
+    W64 -> "%" ++ quadRegNames !! i
+    W32 -> "%" ++ dwordRegNames !! i
   getClassOfReg (PhysicalReg (_, kls, w, gcf)) = (kls, w, gcf)
 
 unRegP (RegP rp) = rp
@@ -39,9 +37,6 @@ dwordRegs = mkRegs W32 dwordRegNames
 [eax, ecx, edx, ebx, edi, esi, esp, ebp, r8d,
  r9d, r10d, r11d, r12d, r13d, r14d, r15d, eip] = dwordRegs
 
-argRegs = [rdi, rsi, rdx, rcx, r8, r9]
-returnReg = rax
-
 mkRegs w names = map mk_reg (zip [0..] names)
   where
     mk_reg (i, _) = RegP (PhysicalReg (MkRegId i, SignedOp, w, MkGcFlag False))
@@ -49,6 +44,6 @@ mkRegs w names = map mk_reg (zip [0..] names)
 regNameToReg = Map.fromList ((zip quadRegNames quadRegs) ++
                              (zip dwordRegNames dwordRegs))
 
-generalRegs = [rbx, r12, r13, r14, r15,
+generalRegs = reverse [rbx, r12, r13, r14, r15,
                rax, rcx, rdx, rdi, rsi, r8, r9, r10, r11]
 

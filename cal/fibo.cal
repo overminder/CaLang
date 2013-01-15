@@ -1,5 +1,4 @@
 export "C" main;
-export fibo;
 
 import atoi, printf;
 
@@ -7,7 +6,7 @@ main(i64 argc, i64 argv) {
     i64 n;
     i64 res;
 
-    if argc < 2 {
+    if argc == 2 {
         n = call "C" atoi(i64[argv + 8]);
     }
     else {
@@ -20,7 +19,7 @@ main(i64 argc, i64 argv) {
 }
 
 fibo(i64 n) {
-    if n < 2 {
+    if n <= 2 {
         return n;
     }
     else {

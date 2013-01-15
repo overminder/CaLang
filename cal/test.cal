@@ -1,0 +1,19 @@
+#include "stdlib.cal"
+
+export "C" main;
+
+main(i64 argc, i64 argv) {
+    i64 n;
+    call "C/vararg" printf("hello, %s!\n", i64[argv]);
+    argc = argc; // HACK
+
+    if (1 <= 1) {
+        n = 1;
+    }
+    else {
+        n = 0;
+    }
+    call "C/vararg" printf("1 <= 1 = %ld\n", n);
+    return 0;
+}
+

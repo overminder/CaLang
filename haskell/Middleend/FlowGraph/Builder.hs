@@ -35,6 +35,7 @@ data FlowGraph a
     funcArgs :: [Reg],
     funcConv :: Bool,
     entryBlock :: BlockId,
+    blockTrace :: [BlockId],
     blockMap :: Map BlockId (BasicBlock a),
     predMap :: Map BlockId (Set BlockId),
     succMap :: Map BlockId (Set BlockId),
@@ -63,17 +64,19 @@ data GraphBuilder a
 type CompilerM = UniqueM
 type GraphBuilderM instr = StateT (GraphBuilder instr) CompilerM
 
-runGraphBuilderM :: String -> [Reg] -> Bool -> GraphBuilderM instr a ->
-                    CompilerM (FlowGraph instr)
+runGraphBuilderM :: Instruction instr => String -> [Reg] -> Bool ->
+                    GraphBuilderM instr a -> CompilerM (FlowGraph instr)
 runGraphBuilderM name args conv m = do
   bdr <- execStateT m empty_builder
-  return (gbGraph bdr) { labelMap = gbLabelMap bdr }
+  let g = (gbGraph bdr) { labelMap = gbLabelMap bdr }
+  return g
   where
     empty_builder = MkBuilder empty_graph empty_block Map.empty []
     empty_graph = MkGraph {
       funcName = name,
       funcArgs = args,
       funcConv = conv,
+      blockTrace = [], -- no trace yet
       entryBlock = (-1),
       blockMap = Map.empty,
       predMap = Map.empty,
@@ -234,16 +237,19 @@ mkTrace g = go [entryBlock g] [] Set.empty
                      goNext = \xs' -> go xs' result' visited'
                   in case Set.size succs of
                        0 -> goNext xs
-                       1 -> goNext (Set.findMin succs : xs)
+                       1 -> case isFallThroughInstr ctrl of
+                              True -> goNext (Set.findMin succs : xs)
+                              False -> goNext (xs ++ [Set.findMin succs])
                        _ -> let (BlockLabel fallThroughBlock)
                                   = getFallThroughTarget ctrl
                                 theOtherBlock = Set.findMin (
                                   Set.delete fallThroughBlock succs)
-                             in goNext (fallThroughBlock : theOtherBlock : xs)
+                             in goNext $ (fallThroughBlock:xs) ++
+                                         [theOtherBlock]
 
 -- Dot file support
 graphToDot :: Ppr instr => FlowGraph instr -> Dot ()
-graphToDot (MkGraph name args _ eb bm pm sm _) = do
+graphToDot (MkGraph name args _ eb _ bm pm sm _) = do
   nodes <- liftM Map.fromList $ forM (Map.toList bm) $ \(bid, bb) -> do
     -- for each block, create a node
     nid <- mk_block_node bb

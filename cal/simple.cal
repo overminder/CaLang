@@ -1,5 +1,46 @@
+export "C" main;
+import printf;
 
-main() {
-    return 1 < 2;
+eq(i64 i, i64 j) {
+    if (i == j) { call "C/vararg" printf("%ld == %ld\n", i, j); }
+    return;
+}
+
+ne(i64 i, i64 j) {
+    if (i != j) { call "C/vararg" printf("%ld != %ld\n", i, j); }
+    return;
+}
+
+lt(i64 i, i64 j) {
+    if (i < j) { call "C/vararg" printf("%ld < %ld\n", i, j); }
+    return;
+}
+
+gt(i64 i, i64 j) {
+    if (i > j) { call "C/vararg" printf("%ld > %ld\n", i, j); }
+    return;
+}
+
+main(i64 argc, i64 argv) {
+    i64 i, j;
+    call "C/vararg" printf("hello, %s!\n", i64[argv]);
+
+    // LOL.. We need DCE after instr sel.
+    argc = argc;
+
+    i = 3;
+    j = 2;
+    call eq(i, j);
+    call ne(i, j);
+    call lt(i, j);
+    call gt(i, j);
+
+    // But if we do things like this...
+    if (i == j) { call "C/vararg" printf("%ld == %ld\n", i, j); }
+    if (i == j) { call "C/vararg" printf("%ld == %ld\n", i, j); }
+    if (i == j) { call "C/vararg" printf("%ld == %ld\n", i, j); }
+    if (i == j) { call "C/vararg" printf("%ld == %ld\n", i, j); }
+
+    return 0;
 }
 
