@@ -32,6 +32,6 @@ instance MonadUnique UniqueM where
 instance (MonadUnique m, MonadTrans t, Monad (t m)) => MonadUnique (t m) where
   liftU = lift . liftU
 
-mkUnique :: UniqueM Unique
-mkUnique = UniqueM $ \i -> (i, i+1)
+mkUnique :: MonadUnique m => m Unique
+mkUnique = liftU (UniqueM $ \i -> (i, i+1))
 

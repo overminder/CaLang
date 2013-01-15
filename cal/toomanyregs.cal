@@ -1,0 +1,41 @@
+
+main(i64 a, i64 b) {
+    i64 c, d, e, f, g, h, i, j, k, l, m, n;
+
+    while (1) {
+        if (a == 1) {
+            n = a;
+        }
+        else if (a == 2) {
+            n = b;
+        }
+        else if (a == 3) {
+            n = c;
+        }
+        else if (a == 4) {
+            n = b;
+        }
+        else if (a == 5) {
+            n = e;
+        }
+        else if (a == 6) {
+            n = f;
+        }
+        else if (a == 7) {
+            n = g;
+        }
+        else if (a == 8) {
+            n = h;
+        }
+        else if (a == 9) {
+            n = i;
+        }
+        else if (a == 10) {
+            n = j;
+        }
+        else {
+            n = k;
+        }
+    }
+    return n + m + l + b;
+}

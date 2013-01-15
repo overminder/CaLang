@@ -15,11 +15,10 @@ import Prelude hiding (foldr, mapM)
 import Text.PrettyPrint
 
 import Middleend.Tac.Instr
-import Middleend.FlowGraph.Builder
-import Backend.Operand hiding (newVReg)
-import qualified Backend.Operand as Op
+import Middleend.FlowGraph.Builder hiding (hasNoSucc)
+import Backend.Operand
 import Utils.Class
-import qualified Utils.Unique as Unique
+import Utils.Unique
 
 -- Block-level local optimization
 -- TODO: take the control instr into consideration.
@@ -62,7 +61,7 @@ data OptState
     thisBlock :: BasicBlock Instr
   }
 
-type CompilerM = Unique.UniqueM
+type CompilerM = UniqueM
 type OptM = StateT OptState CompilerM
 
 runOpt g = do
@@ -72,6 +71,7 @@ runOpt g = do
   return $ MkGraph {
     funcName = funcName g,
     funcArgs = funcArgs g,
+    funcConv = funcConv g,
     entryBlock = entryBlock g,
     blockMap = Map.fromList blocks',
     predMap = predMap g,
@@ -106,9 +106,6 @@ runOpt g = do
       i <- doAliasProp i
       i <- doCSE i
       return i
-
-newVReg :: StorageType -> OptM Operand
-newVReg ty = lift $ Op.newVReg ty
 
 scanBlock :: FlowGraph Instr -> BasicBlock Instr -> OptState
 scanBlock g b = MkOptState {
@@ -235,7 +232,7 @@ applyTFunc tfunc = modify $ \((info_in, info_out), old_tfunc) ->
 
 assignNewNumber :: Reg -> InstrM Reg
 assignNewNumber orig = do
-  OpReg alias <- lift $ newVReg (getClassOfReg orig)
+  OpReg alias <- newRegV (getClassOfReg orig)
   let tfunc info_out = info_out {
     --regAliasMap = Map.insert alias orig (regAliasMap info_out),
     currNumbering = Map.insert orig alias (currNumbering info_out)

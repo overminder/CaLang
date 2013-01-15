@@ -65,7 +65,7 @@ pFunction = do
   name <- ident
   args <- pArgDecls
   stmt <- pStmt
-  return . FuncDef $ Func name args stmt
+  return . FuncDef $ Func name args stmt False
 
 pData = do
   binding <- pTypeBinding

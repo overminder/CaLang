@@ -18,18 +18,14 @@ import Control.Monad.Trans
 import Data.Char (ord)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Utils.Unique (Unique)
-import qualified Utils.Unique as Unique
+import Utils.Unique
 
 import Frontend.AST
-import Backend.Operand hiding (newVReg, newTempLabel)
+import Backend.Operand
 import qualified Backend.Operand as Op
 
-type CompilerM = Unique.UniqueM
+type CompilerM = UniqueM
 type SimplifyM = StateT SimState CompilerM
-
-mkUnique :: SimplifyM Unique.Unique
-mkUnique = lift Unique.mkUnique
 
 data SimState
   = MkState {
@@ -64,7 +60,7 @@ runPipeline ms init = case ms of
 
 -- All of the simplifications
 simplifyFunc :: Func Operand -> SimplifyM (Func Operand)
-simplifyFunc (Func name args body) = do
+simplifyFunc (Func name args body isC) = do
   body' <- runPipeline [extractStr,
                         extractJumpTable,
                         liftNestedCall,
@@ -72,7 +68,7 @@ simplifyFunc (Func name args body) = do
                         return . cleanLiteral,
                         return . cleanDeclStmt]
                        body
-  return $ Func name args body'
+  return $ Func name args body' isC
 
 simplifyData :: Data Operand -> SimplifyM (Data Operand)
 simplifyData (LiteralData (ty, name) lit) = do
@@ -166,7 +162,7 @@ liftNestedCall s = liftExprM lift_expr s
       ECall conv func args -> do
         (func', sfs) <- lift_call func
         (args', sas) <- liftM unzip (mapM lift_call args)
-        tmp <- liftM EVar (newVReg i64)
+        tmp <- liftM EVar (newRegV i64)
         return (tmp, sfs ++ concat sas ++
                      [SAssign tmp (ECall conv func' args')])
       _ -> lift_expr e
@@ -247,8 +243,4 @@ cleanLiteral = traverseExpr clean_lit
       where
         mk_int = EVar . OpImm . IntVal
         mk_flo = EVar . OpImm . FloatVal
-
-newVReg ty = lift $ Op.newVReg ty
-
-newTempLabel name = lift $ Op.newTempLabel name
 

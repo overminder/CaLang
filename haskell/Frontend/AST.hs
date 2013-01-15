@@ -47,9 +47,10 @@ data ToplevelDef a
 
 data Func a
   = Func {
-    fName :: a,
-    fArgs :: [Binding a],
-    fBody :: Stmt a
+    fName    :: a,
+    fArgs    :: [Binding a],
+    fBody    :: Stmt a,
+    fExportC :: Bool
   }
   deriving (Show, Functor)
 
@@ -134,8 +135,8 @@ pprToplevel t = case t of
   ScopeDef s -> pprScope s
 
 pprFunc :: Ppr a => Func a -> Doc
-pprFunc (Func name args body)
-  = ppr name <>
+pprFunc (Func name args body isC)
+  = pprExportType isC <+> ppr name <>
     parens (hcat (punctuate comma (map pprBinding args))) <+>
     pprStmt body
 

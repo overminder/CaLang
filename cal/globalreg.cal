@@ -1,0 +1,7 @@
+
+register Sp "%rbx";
+
+main(i32 argc, i64 argv) {
+    return Sp;
+}
+

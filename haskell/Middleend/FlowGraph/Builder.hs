@@ -1,13 +1,20 @@
-{-# LANGUAGE DeriveFunctor, RankNTypes #-}
+{-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 module Middleend.FlowGraph.Builder (
   runGraphBuilderM,
   buildGraph,
   graphToDot,
   FlowGraph(..),
   BasicBlock(..), BlockId,
+  mkTrace,
+
+  hasNoSucc, getBlock, putBlock, getSuccBlockIds, getPredBlockIds,
 ) where
 
-import Control.Monad.State
+import Prelude hiding (mapM_)
+import Control.Applicative
+import Data.Foldable
+import Data.Traversable
+import Control.Monad.State hiding (forM, forM_, mapM_)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Set (Set)
@@ -17,15 +24,16 @@ import Text.PrettyPrint
 
 import Frontend.AST
 import Backend.Operand
-import qualified Utils.Unique as Unique
+import Utils.Unique
 import Utils.Class
 
-type BlockId = Unique.Unique
+type BlockId = Unique
 
 data FlowGraph a
   = MkGraph {
     funcName :: String,
     funcArgs :: [Reg],
+    funcConv :: Bool,
     entryBlock :: BlockId,
     blockMap :: Map BlockId (BasicBlock a),
     predMap :: Map BlockId (Set BlockId),
@@ -41,7 +49,7 @@ data BasicBlock a
     controlInstr :: Maybe a,
     blockLabels :: [Imm]
   }
-  deriving (Functor)
+  deriving (Functor, Foldable, Traversable)
 
 data GraphBuilder a
   = MkBuilder {
@@ -52,15 +60,12 @@ data GraphBuilder a
   }
   deriving (Functor)
 
-type CompilerM = Unique.UniqueM
+type CompilerM = UniqueM
 type GraphBuilderM instr = StateT (GraphBuilder instr) CompilerM
 
-mkUnique :: forall a. GraphBuilderM a Unique.Unique
-mkUnique = lift Unique.mkUnique
-
-runGraphBuilderM :: String -> [Reg] -> GraphBuilderM instr a ->
+runGraphBuilderM :: String -> [Reg] -> Bool -> GraphBuilderM instr a ->
                     CompilerM (FlowGraph instr)
-runGraphBuilderM name args m = do
+runGraphBuilderM name args conv m = do
   bdr <- execStateT m empty_builder
   return (gbGraph bdr) { labelMap = gbLabelMap bdr }
   where
@@ -68,6 +73,7 @@ runGraphBuilderM name args m = do
     empty_graph = MkGraph {
       funcName = name,
       funcArgs = args,
+      funcConv = conv,
       entryBlock = (-1),
       blockMap = Map.empty,
       predMap = Map.empty,
@@ -77,7 +83,7 @@ runGraphBuilderM name args m = do
 
 empty_block = MkBlock (-1) [] Nothing []
 
-buildGraph :: forall a. Instruction a => [a] -> GraphBuilderM a ()
+buildGraph :: Instruction a => [a] -> GraphBuilderM a ()
 buildGraph is = do
   entry <- newBlock
   modify $ \st -> st {
@@ -86,7 +92,7 @@ buildGraph is = do
   mapM_ addInstr is
   resolveLazyLinks
 
-addInstr :: forall a. Instruction a => a -> GraphBuilderM a ()
+addInstr :: Instruction a => a -> GraphBuilderM a ()
 addInstr i
   | isBranchInstr i = do
       currBlock <- liftM gbCurrBlock get
@@ -130,7 +136,7 @@ addInstr i
       }
     }
 
-resolveLazyLinks :: forall a. GraphBuilderM a ()
+resolveLazyLinks :: GraphBuilderM a ()
 resolveLazyLinks = do
   links <- liftM gbLazyLinks get
   lblMap <- liftM gbLabelMap get
@@ -139,7 +145,7 @@ resolveLazyLinks = do
       Just toId -> linkBlock fromId toId
       Nothing -> error $ "X64.resolveLazyLinks: unknown label: " ++ show lbl
 
-finishCurrBlock :: forall a. GraphBuilderM a ()
+finishCurrBlock :: GraphBuilderM a ()
 finishCurrBlock = do
   currBlock <- liftM gbCurrBlock get
   insertBlock currBlock
@@ -147,7 +153,7 @@ finishCurrBlock = do
     gbCurrBlock = empty_block
   }
 
-insertBlock :: forall a. BasicBlock a -> GraphBuilderM a ()
+insertBlock :: BasicBlock a -> GraphBuilderM a ()
 insertBlock bb = do
   blkMap <- liftM (blockMap . gbGraph) get
   modify $ \st -> st {
@@ -164,12 +170,12 @@ newBlock = do
   }
   return i
 
-addLazyLink :: forall a. BlockId -> Imm -> GraphBuilderM a ()
+addLazyLink :: BlockId -> Imm -> GraphBuilderM a ()
 addLazyLink bid lbl = modify $ \st -> st {
   gbLazyLinks = (bid, lbl):gbLazyLinks st
 }
 
-linkBlock :: forall a. BlockId -> BlockId -> GraphBuilderM a ()
+linkBlock :: BlockId -> BlockId -> GraphBuilderM a ()
 linkBlock bFrom bTo = do
   g <- liftM gbGraph get
   modify $ \st -> st {
@@ -181,15 +187,63 @@ linkBlock bFrom bTo = do
   where
     insert_set = Map.insertWithKey (const Set.union)
 
-addLabelMapping :: forall a. Imm -> BlockId -> GraphBuilderM a ()
+addLabelMapping :: Imm -> BlockId -> GraphBuilderM a ()
 addLabelMapping i b = do
   modify $ \st -> st {
     gbLabelMap = Map.insert i b (gbLabelMap st)
   }
 
+-- Accessors
+
+hasNoSucc :: BlockId -> FlowGraph a -> Bool
+hasNoSucc bid g = Set.null (getSuccBlockIds bid g)
+
+getBlock :: BlockId -> FlowGraph a -> BasicBlock a
+getBlock bid g = (blockMap g) Map.! bid
+
+putBlock :: BasicBlock a -> FlowGraph a -> FlowGraph a
+putBlock b g = g {
+  blockMap = Map.insert (blockId b) b (blockMap g)
+}
+
+getSuccBlockIds :: BlockId -> FlowGraph a -> Set BlockId
+getSuccBlockIds bid g = Map.findWithDefault Set.empty bid (succMap g)
+
+getPredBlockIds :: BlockId -> FlowGraph a -> Set BlockId
+getPredBlockIds bid g = Map.findWithDefault Set.empty bid (predMap g)
+
+-- Linearize the basic blocks.
+-- Note that the block should be simplified (E.g., every block contains a ctrl
+-- instr)
+-- We currently doesn't do jump elimination here.
+mkTrace :: Instruction instr => FlowGraph instr -> [BlockId]
+mkTrace g = go [entryBlock g] [] Set.empty
+  where
+    bmap = blockMap g
+    smap = succMap g
+    go :: [BlockId] -> [BlockId] -> Set BlockId -> [BlockId]
+    go stk result visited = case stk of
+      [] -> result
+      x:xs -> case Set.member x visited of
+        True -> go xs result visited
+        False -> let block = bmap Map.! x
+                     Just ctrl = controlInstr block
+                     succs = Map.findWithDefault Set.empty x smap
+                     visited' = Set.insert x visited
+                     result' = result ++ [x]
+                     goNext = \xs' -> go xs' result' visited'
+                  in case Set.size succs of
+                       0 -> goNext xs
+                       1 -> goNext (Set.findMin succs : xs)
+                       _ -> let (BlockLabel fallThroughBlock)
+                                  = getFallThroughTarget ctrl
+                                theOtherBlock = Set.findMin (
+                                  Set.delete fallThroughBlock succs)
+                             in goNext (fallThroughBlock : theOtherBlock : xs)
+
 -- Dot file support
 graphToDot :: Ppr instr => FlowGraph instr -> Dot ()
-graphToDot (MkGraph name args eb bm pm sm _) = do
+graphToDot (MkGraph name args _ eb bm pm sm _) = do
   nodes <- liftM Map.fromList $ forM (Map.toList bm) $ \(bid, bb) -> do
     -- for each block, create a node
     nid <- mk_block_node bb

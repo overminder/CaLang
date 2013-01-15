@@ -12,28 +12,27 @@ import Prelude hiding (mapM)
 import Control.Monad.State hiding (forM, mapM)
 import Control.Monad.Trans
 import qualified Data.List as List
+import Data.Set (Set)
+import qualified Data.Set as Set
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Traversable
 
 import Frontend.AST
-import Backend.Operand hiding (newVReg, newTempLabel)
+import Backend.Operand
 import qualified Backend.Operand as Op
-import Utils.Unique (Unique)
-import qualified Utils.Unique as Unique
+import Utils.Unique
 
 data RenameState
   = MkState {
     rnGlobals :: Map String Operand,
     rnExports :: [String],
-    rnClobberedRegs :: [Operand]
+    rnClobberedRegs :: [Operand],
+    rnCFuncs :: Set String
   }
 
-type CompilerM = Unique.UniqueM -- for now
+type CompilerM = UniqueM -- for now
 type RenameM = StateT RenameState CompilerM
-
-mkUnique :: RenameM Unique
-mkUnique = lift Unique.mkUnique
 
 runRenameM :: RenameM a -> CompilerM a
 runRenameM m = evalStateT m empty_state
@@ -41,11 +40,12 @@ runRenameM m = evalStateT m empty_state
     empty_state = MkState {
       rnGlobals = Map.empty,
       rnExports = [],
-      rnClobberedRegs = []
+      rnClobberedRegs = [],
+      rnCFuncs = Set.empty
     }
 
 rename :: Program Name -> RenameM ([Data Operand], [Func Operand],
-                                   [String], [Operand])
+                                   [String], [Reg])
 rename xs = do
   -- Two passes
   mapM_ scanToplevel xs
@@ -54,14 +54,15 @@ rename xs = do
   let (w_datas, w_funcs) = List.partition is_data tops
       datas = map unwrap_data w_datas
       funcs = map unwrap_func w_funcs
-  exports <- liftM rnExports get
-  clobRegs <- liftM rnClobberedRegs get
+  exports <- gets rnExports
+  clobRegs <- gets (map unReg . rnClobberedRegs)
   return (datas, funcs, exports, clobRegs)
   where
     is_data (DataDef _) = True
     is_data _ = False
     unwrap_data (DataDef d) = d
     unwrap_func (FuncDef f) = f
+    unReg (OpReg r) = r
 
 -- Worker functions
 
@@ -73,6 +74,12 @@ newGlobal ty name = modify $ \st -> st {
 newExport :: String -> RenameM ()
 newExport name = modify $ \st -> st {
   rnExports = name:rnExports st
+}
+
+newExportC :: String -> RenameM ()
+newExportC name = modify $ \st -> st {
+  rnExports = name:rnExports st,
+  rnCFuncs = Set.insert name (rnCFuncs st)
 }
 
 newGlobalReg :: String -> Operand -> RenameM ()
@@ -87,16 +94,19 @@ resolveGlobal name st = Map.lookup name (rnGlobals st)
 -- First pass on toplevel: scan global defs
 scanToplevel :: ToplevelDef Name -> RenameM ()
 scanToplevel t = case t of
-  FuncDef (Func name _ _) -> newGlobal u32 name
+  FuncDef (Func name _ _ _) -> newGlobal u32 name
   DataDef (LiteralData (ty, name) _) -> newGlobal ty name
   ScopeDef scope -> case scope of
-    Export names conv -> mapM_ newExport names
+    Export names conv -> do
+      if conv
+        then mapM_ newExportC names
+        else mapM_ newExport names
     Import names -> mapM_ (newGlobal i64) names
     GlobalReg name reg -> newGlobalReg name (OpReg reg)
 
 renameToplevel :: ToplevelDef Name -> RenameM [ToplevelDef Operand]
 renameToplevel t = case t of
-  FuncDef f@(Func _ _ _) ->
+  FuncDef f@(Func _ _ _ _) ->
     liftM (pure . FuncDef) (renameFunc f)
   DataDef _ -> do
     dctLookup <- liftM (flip resolveGlobal) get
@@ -112,19 +122,20 @@ renameToplevel t = case t of
     return []
 
 renameFunc :: Func Name -> RenameM (Func Operand)
-renameFunc (Func name args body) = do
-  (Just name') <- liftM (resolveGlobal name) get
+renameFunc (Func name args body _) = do
+  isC <- gets (Set.member name . rnCFuncs)
+  (Just name') <- gets (resolveGlobal name)
   runFuncM $ do
     -- 1st pass
     args' <- forM args $ \(ty, name) -> do
-      op <- lift $ newVReg ty
+      op <- lift $ newRegV ty
       addLocal name op
       return (ty, op)
     scanStmt body
     -- 2nd pass
     nameResolver <- mkNameResolver
     let body' = fmap nameResolver body
-    return $ Func name' args' body'
+    return $ Func name' args' body' isC
 
 type FuncM = StateT LocalRenameState RenameM
 
@@ -168,19 +179,14 @@ mkNameResolver = do
                                   globalVars
   return f
 
--- width -> vreg
-newVReg ty = lift $ Op.newVReg ty
-
-newTempLabel name = lift $ Op.newTempLabel name
-
 -- First pass on function: scan local label defs and var defs.
 scanStmt :: Stmt Name -> FuncM ()
 scanStmt s = case s of
   SVarDecl bs -> forM_ bs $ \(ty, name) -> do
-    op <- lift $ newVReg ty
+    op <- lift $ newRegV ty
     addLocal name op
   SLabel name -> do
-    label <- lift $ newTempLabel name
+    label <- newTempLabel name
     addLocal name label
   SBlock xs -> do
     mapM_ scanStmt xs

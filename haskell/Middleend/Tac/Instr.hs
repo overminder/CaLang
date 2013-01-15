@@ -15,10 +15,12 @@ instance Instruction Instr where
   isLabelInstr = ir_isLabelInstr
   getLabelOfInstr = ir_getLabelOfInstr
   isFallThroughInstr = ir_isFallThroughInstr
+  getFallThroughTarget = ir_getFallThroughTarget
   mkJumpInstr = ir_mkJumpInstr
   renameBranchInstrLabel = ir_renameBranchInstrLabel
   getUseOfInstr = ir_getUseOfInstr
   getDefOfInstr = ir_getDefOfInstr
+  replaceRegInInstr = ir_replaceRegInInstr
 
 instance Ppr Instr where
   ppr = ppr_instr
@@ -112,6 +114,9 @@ ir_isFallThroughInstr i = case i of
                      TailCall `notElem` conv
   _ -> False
 
+ir_getFallThroughTarget i = case i of
+  JIF _ _ _ o2 -> o2
+
 ir_mkJumpInstr = JMP
 
 ir_renameBranchInstrLabel f i = case i of
@@ -145,4 +150,5 @@ ir_getUseOfInstr instr = case instr of
       OpReg r -> [r]
       _ -> []
 
+ir_replaceRegInInstr _ _ = error $ "ir_replaceRegInInstr: not implemented"
 

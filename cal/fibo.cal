@@ -8,7 +8,7 @@ main(i64 argc, i64 argv) {
     i64 res;
 
     if argc < 2 {
-        n = call atoi(i64[argv + 8]);
+        n = call "C" atoi(i64[argv + 8]);
     }
     else {
         n = 30;

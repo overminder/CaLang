@@ -11,11 +11,10 @@ import Data.Traversable
 
 import Frontend.AST
 import Middleend.Tac.Instr
-import Backend.Operand hiding (newVReg)
-import qualified Backend.Operand as Op
-import qualified Utils.Unique as Unique
+import Backend.Operand
+import Utils.Unique
 
-type CompilerM = Unique.UniqueM
+type CompilerM = UniqueM
 type MunchM = WriterT [Instr] CompilerM
 
 runMunchM :: MunchM a -> CompilerM [Instr]
@@ -27,11 +26,6 @@ munch body = do
   munchStmt body
 
 emit = tell . (:[])
-
-newVReg :: StorageType -> MunchM Reg
-newVReg ty = do
-  OpReg r <- lift $ Op.newVReg ty
-  return r
 
 munchStmt s = case s of
   SAssign e1 e2 -> case e1 of
@@ -47,7 +41,7 @@ munchStmt s = case s of
     lbl_false <- case s_false of
       SJump (EVar op@(OpImm lbl)) -> return lbl
       SBlock [] -> do
-        OpImm lbl <- lift (newTempLabel "ifFalse")
+        OpImm lbl <- newTempLabel "ifFalse"
         return lbl
       _ -> error $ "X64.Munch: unsupported instr"
     case e of
@@ -57,8 +51,8 @@ munchStmt s = case s of
       EBinary bop e1 e2 -> do
         case bop of
           LOr -> do
-            lbl_e1_false <- lift (newTempLabel "ifE1False")
-            lbl_end <- lift (newTempLabel "ifOrEnd")
+            lbl_e1_false <- newTempLabel "ifE1False"
+            lbl_end <- newTempLabel "ifOrEnd"
             munchStmt (SIf e1 (SJump (EVar (OpImm lbl_true)))
                               (SJump (EVar lbl_e1_false)))
             emit (LABEL (un_imm lbl_e1_false))
@@ -100,29 +94,31 @@ munchStmt s = case s of
     emit (CASEJUMP r (map (\(OpImm i) -> i) lbls))
   _ -> error $ "Munch.munchStmt: " ++ show s
 
+unReg (OpReg r) = r
+
 munchExpr :: Expr Operand -> MunchM Operand
 munchExpr e = case e of
   EVar op -> case op of
     OpReg r -> return op
     OpImm i -> do
-      tmp <- newVReg i64
-      emit (MOV tmp op)
-      return (OpReg tmp)
+      tmp <- newRegV i64
+      emit (MOV (unReg tmp) op)
+      return tmp
   EBinary bop e1 e2 -> do
-    tmp <- newVReg i64
+    tmp <- newRegV i64
     r1 <- munchExpr e1
     r2 <- munchExpr e2
-    emit (BINOP bop tmp r1 r2)
-    return (OpReg tmp)
+    emit (BINOP bop (unReg tmp) r1 r2)
+    return tmp
   EUnary uop e -> do
-    tmp <- newVReg i64
+    tmp <- newRegV i64
     r <- munchExpr e
     case uop of 
       MRef (_, w, _) -> 
-        emit (LOAD w tmp r)
+        emit (LOAD w (unReg tmp) r)
       _ -> do
-        emit (UNROP uop tmp r)
-    return (OpReg tmp)
+        emit (UNROP uop (unReg tmp) r)
+    return tmp
   ECall conv func args -> do
     func' <- case func of
                EVar op@(OpImm (NamedLabel s)) -> return op
@@ -131,8 +127,8 @@ munchExpr e = case e of
     (tmp, res) <- if TailCall `elem` conv || Noret `elem` conv
                     then return (Nothing, error "tailcall has no value")
                     else do
-                      tmp <- newVReg i64
-                      return (Just tmp, OpReg tmp)
+                      tmp <- newRegV i64
+                      return (Just (unReg tmp), tmp)
     emit (CALL conv tmp func' args')
     return res
 
