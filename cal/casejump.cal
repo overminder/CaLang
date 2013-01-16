@@ -1,0 +1,17 @@
+#include "stdlib.cal"
+
+export "C" main;
+
+main() {
+    switch (0 + 1) [label1, label2];
+
+label1:
+    call puts("Label1");
+    return 0;
+
+label2:
+    call puts("Label2");
+    return 0;
+}
+
+

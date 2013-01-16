@@ -187,7 +187,7 @@ scanStmt s = case s of
     addLocal name op
   SLabel name -> do
     label <- newTempLabel name
-    addLocal name label
+    addLocal name (OpImm label)
   SBlock xs -> do
     mapM_ scanStmt xs
   SIf e s1 s2 -> do

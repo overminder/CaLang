@@ -14,6 +14,7 @@ import qualified Middleend.FlowGraph.Builder as Fg
 import Backend.Operand
 import qualified Backend.X64.OptZero.Frame as F
 import Backend.X64.Instr
+import Backend.X64.Regs
 import Utils.Unique
 
 data MunchState
@@ -80,59 +81,51 @@ munchInstr tac = case tac of
                   else mkCaLangArg
     (argLocs, _) <- mkArg args
     forM_ (zip args argLocs) $ \(arg, loc) -> do
-      emit $ MOV loc (OpReg arg)
+      emit $ movq loc (OpReg arg)
 
   Tac.EPILOG -> emit EPILOG
 
   Tac.MOV dest src -> do
-    emit (MOV src (OpReg dest))
+    emit (movq src (OpReg dest))
 
   Tac.BINOP op dest (OpReg lhs) (OpReg rhs) -> case op of
     AAdd -> emit (LEA (OpAddr (F.mkBaseIndexAddr lhs rhs)) (OpReg dest))
     ASub -> do
-      emit (MOV (OpReg lhs) (OpReg dest))
+      emit (movq (OpReg lhs) (OpReg dest))
       emit (SUB (OpReg rhs) (OpReg dest))
-    AMul -> undefined
-    ADiv -> undefined
+    BShl -> do
+      emit (movq (OpReg lhs) (OpReg dest))
+      emit (movq (OpReg rhs) (OpReg rcx))
+      emit (SHL (OpReg cl) (OpReg dest))
+    _ -> error $ "X64.MunchInstr: not implemented: " ++ show op
 
   Tac.UNROP op dest (OpReg src) -> case op of
-    _ -> undefined
+    _ -> error $ "X64.MunchInstr: UNROP"
 
   Tac.LOAD width dest (OpReg src) -> do
     let op1 = OpAddr (F.mkBaseAddr src)
         op2 = OpReg dest
     case width of
-      W64 -> emit (MOV op1 op2)
+      W64 -> emit (movq op1 op2)
       _ -> emit (MOVSxQ width op1 op2)
 
   Tac.STORE width dest (OpReg src) -> do
-    let op1 = OpReg src
+    let op1 = OpReg (setOpWidth width src)
         op2 = OpAddr (F.mkBaseAddr dest)
-    case width of
-      W64 -> emit (MOV op1 op2)
-      _ -> emit (MOVSxQ width op1 op2)
+    emit (MOV width op1 op2)
 
-  Tac.CASEJUMP _ _ -> undefined
+  Tac.CASEJUMP op _ -> do
+    emit (JMP op Nothing)
 
   Tac.RET mb -> case mb of
     Nothing -> emit (RET False)
     Just (OpReg r) -> do
-      emit (MOV (OpReg r) (OpReg rax))
+      emit (movq (OpReg r) (OpReg rax))
       emit (RET True)
 
   Tac.JIF cond (lhs, rhs) trueLabel _ -> do
-    emit (CMP lhs rhs)
-    -- XXX WHY?
-    -- Should be some bug in Tac's munch code.
-    let cond' = case cond of
-                  RNe -> REq
-                  REq -> RNe
-                  RLt -> RLe
-                  RLe -> RLt
-                  RGe -> RGt
-                  RGt -> RGe
-                  _ -> cond
-    emit (JXX cond' trueLabel)
+    emit (CMP rhs lhs)
+    emit (JXX cond trueLabel)
 
   Tac.JMP op -> do
     emit (JMP (OpImm op) Nothing)
@@ -149,11 +142,11 @@ munchInstr tac = case tac of
         callInstr = instrCtor func
     (argLocs, preCallInstrs) <- mkArg args
     forM (zip args argLocs) $ \(src, dest) -> do
-      emit (MOV src dest)
+      emit (movq src dest)
     tell preCallInstrs
     emit (callInstr (isJust mbRes, argLocs))
     case mbRes of
-      Just dest -> addToNextBlock (MOV (OpReg rax) (OpReg dest))
+      Just dest -> addToNextBlock (movq (OpReg rax) (OpReg dest))
       Nothing -> return ()
 
 addToNextBlock instr = modifyInstrForNextBlock $ \mbi -> case mbi of

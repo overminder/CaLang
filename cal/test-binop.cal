@@ -1,0 +1,32 @@
+#include "stdlib.cal"
+
+#define TEST_BINOP(op, lhs, rhs) \
+    if (lhs op rhs) { \
+        call "C/vararg" printf(#lhs " " #op " " #rhs " = True\n"); \
+    } \
+    else { \
+        call "C/vararg" printf(#lhs " " #op " " #rhs " = False\n"); \
+    }
+
+export "C" main;
+
+main() {
+    TEST_BINOP(<,  1, 2)
+    TEST_BINOP(<=, 1, 2)
+    TEST_BINOP(>,  1, 2)
+    TEST_BINOP(>=, 1, 2)
+    TEST_BINOP(==, 1, 2)
+    TEST_BINOP(!=, 1, 2)
+
+    TEST_BINOP(<,  1, 1)
+    TEST_BINOP(<=, 1, 1)
+    TEST_BINOP(>,  1, 1)
+    TEST_BINOP(>=, 1, 1)
+    TEST_BINOP(==, 1, 1)
+    TEST_BINOP(!=, 1, 1)
+
+    TEST_BINOP(-, 1, 1)
+    TEST_BINOP(+, 1, 1)
+    return 0;
+}
+

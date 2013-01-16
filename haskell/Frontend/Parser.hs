@@ -61,7 +61,11 @@ manyStrLit = do
   return (concat lits)
 
 -- Syntax defs
-pProgram = ws >> many pToplevel
+pProgram = do
+  ws
+  prog <- many pToplevel
+  eof
+  return prog
 
 pToplevel = pFunction <|> pData <|> pScope
 

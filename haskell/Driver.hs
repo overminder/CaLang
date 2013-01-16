@@ -25,7 +25,7 @@ import qualified Middleend.FlowGraph.Builder as Fg
 import qualified Middleend.FlowGraph.Simplify as Fg
 import qualified Middleend.Tac.Munch as Tac
 import qualified Middleend.Tac.Instr as Tac
-import qualified Middleend.Tac.LocalOpt as Tac
+--import qualified Middleend.Tac.LocalOpt as Tac
 import Backend.Operand
 import qualified Backend.HOST_ARCH.OptZero.Munch as Arch
 import qualified Backend.HOST_ARCH.OptZero.Frame as Arch
@@ -88,12 +88,16 @@ parseDriverOpt asimGs = parseOpt options asimGs emptyOption
       "-" -> return opt
       _ -> do
         h <- openFile path ReadMode
-        return $ opt { optInput = h }
+        return $ opt { optInput = h
+                     , optInputFile = path
+                     }
     setOutput path opt = case path of
       "-" -> return opt
       _ -> do
         h <- openFile path WriteMode
-        return $ opt { optOutput = h }
+        return $ opt { optOutput = h
+                     , optOutputFile = path
+                     }
 
 runAllPasses s = evalUniqueM $ do
   let rdrProg = runParsePass s
@@ -116,7 +120,7 @@ driverMain = do
                                                         , locations = False
                                                         }
                       in do
-                        cppd' <- lift $ cppIfdef "/dev/null" [] ["."]
+                        cppd' <- lift $ cppIfdef inputPath [] ["."]
                                         cppOption src
                         lift $ macroPass [] cppOption cppd'
                 else return src
@@ -126,8 +130,8 @@ driverMain = do
     h <- asks optOutput
     lift $ hClose h
 
-outputPass ( (prog, (exports, clobs, simDatas), fs)
-           , (iss, simGs, locOptGs)
+outputPass ( (prog, (exports, clobs, _), fs)
+           , (iss, simDatas, simGs)
            , (natGs, lvNatGs, interfGs, colors, ralGs, platNatGs)) = do
   h <- asks optOutput
   level <- asks optOutputLevel
@@ -140,7 +144,7 @@ outputPass ( (prog, (exports, clobs, simDatas), fs)
         lift . hPutStrLn h $ "# Entry for <" ++ show (pprSignature f) ++ ">"
         mapM_ (lift . hPutStrLn h . show . ppr) is
     OutputRawDot -> output_flowGraphs simGs
-    OutputLocOptDot -> output_flowGraphs locOptGs
+    --OutputLocOptDot -> output_flowGraphs locOptGs
     OutputOptZeroDot -> output_flowGraphs natGs
     OutputOptZeroLiveness -> output_flowGraphs lvNatGs
     OutputOptZeroInterf -> output_interfGraphs interfGs
@@ -176,35 +180,35 @@ outputPass ( (prog, (exports, clobs, simDatas), fs)
     output_asm_export exports = do
       h <- asks optOutput
       forM_ exports $ \s -> do
-        lift . hPutStrLn h $ ".globl " ++ s
+        lift . hPutStrLn h $ "\t.globl " ++ s
 
     output_asm_data datas = do
       h <- asks optOutput
       forM_ datas $ \(LiteralData (_, label) lit) -> do
-        lift . hPutStrLn h $ ".align 16"
-        lift . hPutStrLn h $ ".data"
+        lift . hPutStrLn h $ "\t.align 16"
+        lift . hPutStrLn h $ "\t.data"
         lift . hPutStrLn h $ show (ppr label) ++ ":"
         lift . hPutStrLn h . show_lit $ lit
 
     show_lit lit = case lit of
-      LInt i -> ".quad " ++ show i
-      LChr c -> ".byte " ++ show c
-      LStr s -> ".string " ++ show s
-      LFlo d -> ".double " ++ show d
-      LSym (OpImm (NamedLabel s)) -> ".quad " ++ s
+      LInt i -> "\t.quad " ++ show i
+      LChr c -> "\t.byte " ++ show c
+      LStr s -> "\t.string " ++ show s
+      LFlo d -> "\t.double " ++ show d
+      LSym (OpImm s) -> "\t.quad " ++ show (pprImm s)
       LArr lits -> unlines (map show_lit lits)
 
     output_asm_code graphs = do
       h <- asks optOutput
       let writeLn = lift . hPutStrLn h
       forM_ graphs $ \g -> do
-        writeLn $ ".align 16"
-        writeLn $ ".text"
+        writeLn $ "\t.align 16"
+        writeLn $ "\t.text"
         writeLn $ Fg.funcName g ++ ":"
         let blocks = getBlockTrace (Fg.blockTrace g) (Fg.blockMap g)
         forM_ blocks $ \b -> do
           writeLn $ show (pprImm (BlockLabel (Fg.blockId b))) ++ ":"
-          Foldable.mapM_ (writeLn . show . ppr) b
+          Foldable.mapM_ (writeLn . ("\t"++) . show . ppr) b
       where
         getBlockTrace ids bmap = map (bmap Map.!) ids
 
@@ -220,20 +224,37 @@ runFrontendPass rdrProg = do
   (simDatas, simFuncs) <- Sim.runSimplifyM (Sim.simplify rnDatas rnFuncs)
   return (rdrProg, (exports, clobRegs, simDatas), simFuncs)
 
-runGraphPass (_, _, simFuncs) = do
+runGraphPass (_, (_, _, datas), simFuncs) = do
   (insnss, rawGraphs) <- liftM unzip $ mapM mkInstrAndGraph simFuncs
   let simGraphs = map Fg.simplify rawGraphs
-  locOptGrs <- mapM Tac.runOpt simGraphs
-  return (insnss, simGraphs, locOptGrs)
+  --locOptGrs <- mapM Tac.runOpt simGraphs
+
+  -- Since we renamed local labels to block labels during flow graph
+  -- building, we need to rename static datas that refer to local labels
+  -- as well.
+  let symbolRenamer = foldr (Map.union . Fg.labelMap) Map.empty rawGraphs
+      renamedDatas = map (renameData symbolRenamer) datas
+  return (insnss, renamedDatas, simGraphs)
+
   where
   mkInstrAndGraph (Func (OpImm (NamedLabel name)) asimGs body isC) = do
     insns <- Tac.runMunchM . Tac.munch $ body
     let regAsimGs = map (unReg . snd) asimGs
     graph <- Fg.runGraphBuilderM name regAsimGs isC . Fg.buildGraph $ insns
     return (insns, graph)
+
+  renameImm dct imm = case Map.lookup imm dct of
+    Nothing -> imm
+    Just bid -> BlockLabel bid
+  renameLiteral dct lit = case lit of
+    LSym (OpImm imm) -> LSym (OpImm (renameImm dct imm))
+    LArr xs -> LArr (map (renameLiteral dct) xs)
+    _ -> lit
+  renameData dct (LiteralData bd lit)
+    = LiteralData bd (renameLiteral dct lit)
   unReg (OpReg r) = r
 
-runOptZeroPass (_, (_, clobs, _), _) (_, simGs, _) = do
+runOptZeroPass (_, (_, clobs, _), _) (_, _, simGs) = do
   let natGs = map (Arch.evalMunchM . Arch.munchGraph) simGs
       lvNatGs = map Ral.iterLiveness natGs
   interfGs <- mapM Ral.buildGraph lvNatGs

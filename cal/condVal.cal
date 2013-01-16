@@ -1,0 +1,28 @@
+#include "stdlib.cal"
+
+export "C" main;
+
+firstFunc() {
+    call "C" puts("firstFunc");
+    return 0;
+}
+
+secondFunc() {
+    call "C" puts("secondFunc");
+    return 1;
+}
+
+thirdFunc() {
+    call "C" puts("thirdFunc");
+    return 1;
+}
+
+main() {
+    i64 i;
+    
+    i = call firstFunc() || call secondFunc() || call thirdFunc();
+    call "C/vararg" printf("i = %ld\n", i);
+
+    return 0;
+}
+

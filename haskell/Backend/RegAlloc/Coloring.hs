@@ -57,7 +57,7 @@ materialize assign interfGraph flowGraph
       = if isVirtualReg r
           then case Map.lookup r (regToVertex interfGraph) of
                  Just v -> case Map.lookup v assign of
-                   Just r' -> copyGcFlag r r'
+                   Just r' -> copyGcFlag r . copyOpWidth r $ r'
                    Nothing ->
                      error $ "materialize: Reg not allocated for " ++ show r
                  Nothing ->

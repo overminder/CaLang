@@ -3,14 +3,12 @@ module Frontend.Simplify (
   simplify,
 ) where
 -- This is a pass after renaming. It does the following things:
---  * Extract string literals in functions and daats and replace them
+--  * Extract string literals in functions and replace them
 --    with labels
 --  * Lift logical expressions out and turn them into If statements
 --  * Lift nested call so that each child of a call cannot be a call
 --  * Make and attach jump table for switch statement
---  * Remove literal nodes in functions
---  * Desugar if and while so that functions only contain simple branches:
---    if (e) { goto L1; }
+--  * Transform ELit nodes to EVar Operator nodes
 --  * Remove type declaration statements in functions
 
 import Control.Monad.State
@@ -22,7 +20,6 @@ import Utils.Unique
 
 import Frontend.AST
 import Backend.Operand
-import qualified Backend.Operand as Op
 
 type CompilerM = UniqueM
 type SimplifyM = StateT SimState CompilerM
@@ -64,7 +61,6 @@ simplifyFunc (Func name args body isC) = do
   body' <- runPipeline [extractStr,
                         extractJumpTable,
                         liftNestedCall,
-                        desugarControlStmt,
                         return . cleanLiteral,
                         return . cleanDeclStmt]
                        body
@@ -166,43 +162,6 @@ liftNestedCall s = liftExprM lift_expr s
         return (tmp, sfs ++ concat sas ++
                      [SAssign tmp (ECall conv func' args')])
       _ -> lift_expr e
-
--- Such that each basic block is started by a label (exact for entry)
--- and ended by a control instr (ret/jmp/call)
--- ... Well, seems that we cannot do that here (User can insert label
---     anywhere). Instead we ensure this invariant in the flow graph builder.
-desugarControlStmt :: Stmt Operand -> SimplifyM (Stmt Operand)
-desugarControlStmt s = do
-  xs <- desugar s
-  return $ if length xs == 1 then head xs else SBlock xs
-  where
-    flatten s = case s of
-      SBlock xs -> xs
-      _ -> [s]
-    desugar s = case s of
-      SBlock xs -> liftM concat (mapM desugar xs)
-      SIf e s1 s2 -> do
-        s1' <- desugar s1
-        s2' <- desugar s2
-        lbl_false <- newTempLabel "ifFalse"
-        lbl_end <- newTempLabel "ifEnd"
-        let ifStmt = SIf (EUnary LNot e)
-                         (SJump (EVar lbl_false))
-                         (SBlock [])
-        return $ [ifStmt] ++ s1' ++
-                 [SJump (EVar lbl_end), SLabel lbl_false] ++ s2' ++
-                 [SLabel lbl_end]
-      SWhile e s -> do
-        s' <- desugar s
-        lbl_loop <- newTempLabel "whileLoop"
-        lbl_check <- newTempLabel "whileCheck"
-        lbl_end <- newTempLabel "whileEnd"
-        return $ [SIf e (SJump (EVar lbl_loop)) (SJump (EVar lbl_end)),
-                  SLabel lbl_loop] ++ s' ++
-                 [SLabel lbl_check,
-                  SIf e (SJump (EVar lbl_loop)) (SBlock []),
-                  SLabel lbl_end]
-      _ -> return [s]
 
 -- clean VarDecl
 cleanDeclStmt :: Stmt Operand -> Stmt Operand

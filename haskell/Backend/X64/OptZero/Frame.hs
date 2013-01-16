@@ -129,8 +129,8 @@ getAndClearPrependInstr = do
 mkCallerSaveRestoreInstr :: Reg -> FrameM (Liveness Instr, Liveness Instr)
 mkCallerSaveRestoreInstr r = do
   loc <- stackAlloc r
-  return (mkEmptyLiveness (MOV (OpReg r) loc),
-          mkEmptyLiveness (MOV loc (OpReg r)))
+  return (mkEmptyLiveness (movq (OpReg r) loc),
+          mkEmptyLiveness (movq loc (OpReg r)))
 
 setPrependInstr :: ([Liveness Instr] -> [Liveness Instr]) -> FrameM ()
 setPrependInstr is = modify $ \st -> st { prependInstr = is }
@@ -162,8 +162,8 @@ replacePrologWithSaves i = case instr i of
             then do
               offset <- lift $ stackAllocRaw natSize
               let dest = OpAddr . mkFrameAddr $ (offset - natSize)
-                  saveInstr = MOV (OpReg r) dest
-                  restoreInstr = MOV dest (OpReg r)
+                  saveInstr = movq (OpReg r) dest
+                  restoreInstr = movq dest (OpReg r)
               tell [mkEmptyLiveness saveInstr]
               modify $ \st -> st {
                 epilogRestoreInstrs = epilogRestoreInstrs st ++
@@ -189,7 +189,7 @@ adjustStackFrame i = case instr i of
   PROLOG -> do
     spOffset <- gets stackPtr
     let instrs = [ PUSH (OpReg rbp)
-                 , MOV (OpReg rsp) (OpReg rbp)
+                 , movq (OpReg rsp) (OpReg rbp)
                  ] ++ spAdj
         spAdj = if spOffset == 0
                   then []
@@ -201,7 +201,7 @@ adjustStackFrame i = case instr i of
   _ -> return [i]
   where
     handleEpilog = do
-      let instrs = [ MOV (OpReg rbp) (OpReg rsp)
+      let instrs = [ movq (OpReg rbp) (OpReg rsp)
                    , POP (OpReg rbp)
                    ]
       return $ (fmap mkEmptyLiveness instrs) ++ [i]

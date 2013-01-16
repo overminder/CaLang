@@ -240,12 +240,15 @@ mkTrace g = go [entryBlock g] [] Set.empty
                        1 -> case isFallThroughInstr ctrl of
                               True -> goNext (Set.findMin succs : xs)
                               False -> goNext (xs ++ [Set.findMin succs])
-                       _ -> let (BlockLabel fallThroughBlock)
-                                  = getFallThroughTarget ctrl
-                                theOtherBlock = Set.findMin (
-                                  Set.delete fallThroughBlock succs)
-                             in goNext $ (fallThroughBlock:xs) ++
-                                         [theOtherBlock]
+                       _ -> case isFallThroughInstr ctrl of
+                         -- 2 or moar (SWITCH!) jump destinations
+                              True -> let (BlockLabel fallThroughBlock)
+                                            = getFallThroughTarget ctrl
+                                          theOtherBlock = Set.findMin (
+                                            Set.delete fallThroughBlock succs)
+                                       in goNext $ (fallThroughBlock:xs) ++
+                                          [theOtherBlock]
+                              False -> goNext $ xs ++ Set.toList succs
 
 -- Dot file support
 graphToDot :: Ppr instr => FlowGraph instr -> Dot ()

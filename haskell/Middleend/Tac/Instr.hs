@@ -112,6 +112,7 @@ ir_getLabelOfInstr (LABEL imm) = imm
 ir_isFallThroughInstr i = case i of
   CALL conv _ _ _ -> Noret `notElem` conv &&
                      TailCall `notElem` conv
+  JIF _ _ _ _ -> True
   _ -> False
 
 ir_getFallThroughTarget i = case i of

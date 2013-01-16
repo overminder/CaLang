@@ -1,7 +1,19 @@
 
-main(i64 argc, i64 argv) {
-    if argc == 0
-        return 0;
-    else
+greaterThan(i64 lhs, i64 rhs) {
+    if (lhs > rhs) {
         return 1;
+    }
+    else {
+        return 0;
+    }
 }
+
+equal(i64 lhs, i64 rhs) {
+    if (lhs == rhs) {
+        return 1;
+    }
+    else {
+        return 0;
+    }
+}
+

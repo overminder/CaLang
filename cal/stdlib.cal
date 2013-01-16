@@ -1,5 +1,24 @@
+import puts, printf, atoi, exit;
 
-import printf, atoi, exit;
+#define EXPECT_TRUE(expr) \
+    if (expr) { \
+        call "C/vararg" printf("%-12s ...OK.\n", #expr); \
+    } \
+    else { \
+        call "C/vararg" printf( \
+              "%-12s ...FAILED (Expecting True) at %s:%d.\n", \
+               #expr, __FILE__, __LINE__); \
+    }
+
+#define EXPECT_FALSE(expr) \
+    if (expr) { \
+        call "C/vararg" printf( \
+              "%-12s ...FAILED (Expecting False) at %s:%d.\n", \
+               #expr, __FILE__, __LINE__); \
+    } \
+    else { \
+        call "C/vararg" printf("%-12s ...OK.\n", #expr); \
+    }
 
 getArg(i64 argc, i64 argv, i64 default) {
     if argc == 2 {

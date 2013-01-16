@@ -3,7 +3,7 @@ module Backend.Common (
   Register(..), Instruction(..),
 
   -- Primitives
-  MachOp(..), reverseCond, isCondOp, showMachOp,
+  MachOp(..), reverseCond, isCondOp, isLogicOp, showMachOp,
   OpClass(..),
   OpWidth(..), opWidths, intToWidth,
   StorageType,
@@ -20,11 +20,14 @@ module Backend.Common (
   -- Used by codegen
   newRegV,
   newTempLabel,
+  setOpWidth,
 
   -- Used by regalloc
   mkUseOfSrc, mkDefOfSrc,
   mkUseOfDest, mkDefOfDest,
-  replaceRegInOp, copyGcFlag,
+  replaceRegInOp,
+  copyGcFlag,
+  copyOpWidth,
 
 ) where
 
@@ -68,10 +71,24 @@ data Reg
 type RegDescr = (RegId, OpClass, OpWidth, GcFlag)
 
 newtype VirtualReg = VirtualReg { unVirtReg :: RegDescr }
-  deriving (Show, Eq, Ord)
+  deriving (Show)
+
+instance Eq VirtualReg where
+  (VirtualReg (rid, _, _, _)) == (VirtualReg (rid', _, _, _)) = rid == rid'
+
+instance Ord VirtualReg where
+  compare (VirtualReg (rid, _, _, _)) (VirtualReg (rid', _, _, _))
+    = compare rid rid'
 
 newtype PhysicalReg = PhysicalReg { unPhysReg :: RegDescr }
-  deriving (Show, Eq, Ord)
+  deriving (Show)
+
+instance Eq PhysicalReg where
+  (PhysicalReg (rid, _, _, _)) == (PhysicalReg (rid', _, _, _)) = rid == rid'
+
+instance Ord PhysicalReg where
+  compare (PhysicalReg (rid, _, _, _)) (PhysicalReg (rid', _, _, _))
+    = compare rid rid'
 
 instance Register VirtualReg where
   isVirtualReg _ = True
@@ -209,6 +226,12 @@ isCondOp op = case op of
   RGe -> True
   _ -> False
 
+isLogicOp :: MachOp -> Bool
+isLogicOp op = case op of
+  LOr -> True
+  LAnd -> True
+  LNot -> True
+  _ -> False
 
 -- Commonly used
 newRegV :: MonadUnique m => StorageType -> m Operand
@@ -216,10 +239,10 @@ newRegV (kls, width, gc) = do
   i <- mkUnique
   return . OpReg $ RegV (VirtualReg (MkRegId i, kls, width, gc))
 
-newTempLabel :: MonadUnique m => String -> m Operand
+newTempLabel :: MonadUnique m => String -> m Imm
 newTempLabel s = do
   i <- mkUnique
-  return . OpImm . TempLabel s $ i
+  return . TempLabel s $ i
 
 -- For regalloc
 
@@ -260,6 +283,22 @@ copyGcFlag from to = to'
     gcf = case from of
             RegV (VirtualReg (_, _, _, gcf)) -> gcf
     to' = case to of
-            RegP (PhysicalReg (rid, w, kls, _)) ->
-              RegP (PhysicalReg (rid, w, kls, gcf))
+            RegP (PhysicalReg (rid, kls, w, _)) ->
+              RegP (PhysicalReg (rid, kls, w, gcf))
+
+copyOpWidth :: Reg -> Reg -> Reg
+copyOpWidth from to = to'
+  where
+    w = case from of
+          RegV (VirtualReg (_, _, w, _)) -> w
+    to' = setOpWidth w to
+
+setOpWidth :: OpWidth -> Reg -> Reg
+setOpWidth w r = r'
+  where
+    r' = case r of
+      RegP (PhysicalReg (rid, kls, _, gcf)) ->
+        RegP (PhysicalReg (rid, kls, w, gcf))
+      RegV (VirtualReg (rid, kls, _, gcf)) ->
+        RegV (VirtualReg (rid, kls, w, gcf))
 

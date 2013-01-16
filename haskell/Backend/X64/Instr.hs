@@ -1,5 +1,6 @@
 module Backend.X64.Instr (
   Instr(..),
+  movq,
 ) where
 
 import Text.PrettyPrint
@@ -30,7 +31,7 @@ data Instr
   | PROLOG
   | EPILOG
   
-  | MOV    Operand Operand
+  | MOV    OpWidth Operand Operand
   | MOVZxQ OpWidth Operand Operand
   | MOVSxQ OpWidth Operand Operand
 
@@ -70,6 +71,9 @@ data Instr
   | CALL   Operand CallSiteInfo -- The same as JMP
   | RET    Bool -- True when returning the rax, or false otherwise
   deriving (Show)
+
+-- Commonly used
+movq = MOV W64
 
 type CallSiteInfo = ( Bool       -- Needs result?
                     , [Operand]  -- Arguments used (%rdi-%r9, mems..)
@@ -125,7 +129,7 @@ x64_renameBranchInstrLabel f instr = case instr of
   _ -> instr
 
 x64_getUseOfInstr instr = case instr of
-  MOV      o1 o2 -> mkUseOfSrc o1 ++ mkUseOfDest o2
+  MOV    _ o1 o2 -> mkUseOfSrc o1 ++ mkUseOfDest o2
   MOVZxQ _ o1 o2 -> mkUseOfSrc o1 ++ mkUseOfDest o2
   MOVSxQ _ o1 o2 -> mkUseOfSrc o1 ++ mkUseOfDest o2
 
@@ -163,7 +167,7 @@ x64_getUseOfInstr instr = case instr of
   _              -> []
 
 x64_getDefOfInstr instr = case instr of
-  MOV      o1 o2 -> mkDefOfSrc o1 ++ mkDefOfDest o2
+  MOV    _ o1 o2 -> mkDefOfSrc o1 ++ mkDefOfDest o2
   MOVZxQ _ o1 o2 -> mkDefOfSrc o1 ++ mkDefOfDest o2
   MOVSxQ _ o1 o2 -> mkDefOfSrc o1 ++ mkDefOfDest o2
 
@@ -208,7 +212,7 @@ mkUseOfCallSiteInfo (_, args) = map unReg args
 mkDefOfCallSiteInfo (hasResult, _) = if hasResult then [rax] else []
 
 x64_replaceRegInInstr f i = case i of
-  MOV      o1 o2 -> MOV      (f' o1) (f' o2)
+  MOV    w o1 o2 -> MOV    w (f' o1) (f' o2)
   MOVZxQ w o1 o2 -> MOVZxQ w (f' o1) (f' o2)
   MOVSxQ w o1 o2 -> MOVSxQ w (f' o1) (f' o2)
 
@@ -257,14 +261,22 @@ ppr_instr i = case i of
   _ -> text pref <+> (hcat (punctuate comma (map (pprGasOperand i) operands)))
   where
     pprGasOperand i op = case op of
-      OpImm imm -> prefix <> pprImm imm
-      _ -> ppr op
+      OpImm imm -> immPrefix <> pprImm imm
+      OpReg r -> regPrefix <> pprReg r
+      OpAddr a -> addrPrefix <> pprAddr a
       where
-        prefix = case i of
+        immPrefix = case i of
           JMP  _ _ -> empty
           JXX  _ _ -> empty
           CALL _ _ -> empty
           _        -> char '$'
+
+        regPrefix = case i of
+          JMP  _ _ -> char '*'
+          CALL _ _ -> char '*'
+          _        -> empty
+
+        addrPrefix = regPrefix
 
     (pref, operands) = disas i
 
@@ -283,7 +295,7 @@ ppr_instr i = case i of
       RLt -> "l"
 
     disas i = case i of
-      MOV    o1 o2 -> ("mov",  [o1, o2])
+      MOV    w o1 o2 -> ("mov" ++ show_width w,  [o1, o2])
       MOVZxQ w o1 o2 -> ("movz" ++ show_width w ++ "q", [o1, o2])
       MOVSxQ w o1 o2 -> ("movs" ++ show_width w ++ "q", [o1, o2])
       LEA    o1 o2 -> ("lea",  [o1, o2])

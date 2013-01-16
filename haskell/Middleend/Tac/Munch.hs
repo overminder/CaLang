@@ -37,37 +37,52 @@ munchStmt s = case s of
       o2 <- munchExpr e2
       emit (STORE w r1 o2)
     _ -> error $ "Munch.munchStmt: not a valid assign stmt: " ++ show s
-  SIf e (SJump (EVar (OpImm lbl_true))) s_false -> do
-    lbl_false <- case s_false of
-      SJump (EVar op@(OpImm lbl)) -> return lbl
-      SBlock [] -> do
-        OpImm lbl <- newTempLabel "ifFalse"
-        return lbl
-      _ -> error $ "X64.Munch: unsupported instr"
+  SIf e s_true s_false -> do
     case e of
-      EUnary LNot e -> do
-        munchStmt (SIf e (SJump (EVar (OpImm lbl_true)))
-                         (SJump (EVar (OpImm lbl_false))))
+      EUnary LNot innerE -> do
+        munchStmt (SIf innerE s_false s_true)
       EBinary bop e1 e2 -> do
         case bop of
           LOr -> do
+            lbl_do_true <- newTempLabel "ifDoTrue"
             lbl_e1_false <- newTempLabel "ifE1False"
+            lbl_do_false <- newTempLabel "ifDoFalse"
             lbl_end <- newTempLabel "ifOrEnd"
-            munchStmt (SIf e1 (SJump (EVar (OpImm lbl_true)))
-                              (SJump (EVar lbl_e1_false)))
-            emit (LABEL (un_imm lbl_e1_false))
-            munchStmt (SIf e2 (SJump (EVar (OpImm lbl_true)))
-                              (SJump (EVar (OpImm lbl_false))))
-            where
-              un_imm (OpImm i) = i
-          _ -> do
-            r1 <- munchExpr e1
-            r2 <- munchExpr e2
-            emit (JIF bop (r1, r2) lbl_true lbl_false)
-      _ -> do
-        r <- munchExpr e
-        emit (JIF REq (r, mkInt 0) lbl_true lbl_false)
-    emit (LABEL lbl_false)
+            munchStmt (SIf e1 (SJump (EVar (OpImm lbl_do_true)))
+                              (SJump (EVar (OpImm lbl_e1_false))))
+            emit (LABEL lbl_e1_false)
+            munchStmt (SIf e2 (SJump (EVar (OpImm lbl_do_true)))
+                              (SJump (EVar (OpImm lbl_do_false))))
+            emit (LABEL lbl_do_true)
+            munchStmt s_true
+            emit (JMP lbl_end)
+            emit (LABEL lbl_do_false)
+            munchStmt s_false
+            emit (LABEL lbl_end)
+          LAnd -> do
+            lbl_do_true <- newTempLabel "ifDoTrue"
+            lbl_e1_true <- newTempLabel "ifE1True"
+            lbl_do_false <- newTempLabel "ifDoFalse"
+            lbl_end <- newTempLabel "ifOrEnd"
+            munchStmt (SIf e1 (SJump (EVar (OpImm lbl_e1_true)))
+                              (SJump (EVar (OpImm lbl_do_false))))
+            emit (LABEL lbl_e1_true)
+            munchStmt (SIf e2 (SJump (EVar (OpImm lbl_do_true)))
+                              (SJump (EVar (OpImm lbl_do_false))))
+            emit (LABEL lbl_do_true)
+            munchStmt s_true
+            emit (JMP lbl_end)
+            emit (LABEL lbl_do_false)
+            munchStmt s_false
+            emit (LABEL lbl_end)
+          RNe -> munchRel bop e1 e2 s_true s_false
+          REq -> munchRel bop e1 e2 s_true s_false
+          RLt -> munchRel bop e1 e2 s_true s_false
+          RLe -> munchRel bop e1 e2 s_true s_false
+          RGt -> munchRel bop e1 e2 s_true s_false
+          RGe -> munchRel bop e1 e2 s_true s_false
+          _ -> munchStmt (SIf (EBinary RNe e (EVar (mkInt 0))) s_true s_false)
+      _ -> munchStmt (SIf (EBinary RNe e (EVar (mkInt 0))) s_true s_false)
   SBlock xs -> mapM_ munchStmt xs
   SReturn mbE -> do
     mbR <- mapM munchExpr mbE
@@ -94,7 +109,24 @@ munchStmt s = case s of
     emit (CASEJUMP r (map (\(OpImm i) -> i) lbls))
   _ -> error $ "Munch.munchStmt: " ++ show s
 
+munchRel :: MachOp -> Expr Operand -> Expr Operand -> 
+            Stmt Operand -> Stmt Operand -> MunchM ()
+munchRel op e1 e2 s_true s_false = do
+  lbl_true <- newTempLabel "ifTrue"
+  lbl_false <- newTempLabel "ifFalse"
+  lbl_end <- newTempLabel "ifEnd"
+  r1 <- munchExpr e1
+  r2 <- munchExpr e2
+  emit (JIF op (r1, r2) lbl_true lbl_false)
+  emit (LABEL lbl_true)
+  munchStmt s_true
+  emit (JMP lbl_end)
+  emit (LABEL lbl_false)
+  munchStmt s_false
+  emit (LABEL lbl_end)
+
 unReg (OpReg r) = r
+unImm (OpImm i) = i
 
 munchExpr :: Expr Operand -> MunchM Operand
 munchExpr e = case e of
@@ -106,18 +138,26 @@ munchExpr e = case e of
       return tmp
   EBinary bop e1 e2 -> do
     tmp <- newRegV i64
-    r1 <- munchExpr e1
-    r2 <- munchExpr e2
-    emit (BINOP bop (unReg tmp) r1 r2)
+    if isLogicOp bop || isCondOp bop
+      then do
+        fallBackToIf tmp
+      else do
+        r1 <- munchExpr e1
+        r2 <- munchExpr e2
+        emit (BINOP bop (unReg tmp) r1 r2)
     return tmp
   EUnary uop e -> do
     tmp <- newRegV i64
-    r <- munchExpr e
-    case uop of 
-      MRef (_, w, _) -> 
-        emit (LOAD w (unReg tmp) r)
-      _ -> do
-        emit (UNROP uop (unReg tmp) r)
+    if isLogicOp uop
+      then do
+        fallBackToIf tmp
+      else do
+        r <- munchExpr e
+        case uop of
+          MRef (_, w, _) -> 
+            emit (LOAD w (unReg tmp) r)
+          _ -> do
+            emit (UNROP uop (unReg tmp) r)
     return tmp
   ECall conv func args -> do
     func' <- case func of
@@ -131,6 +171,11 @@ munchExpr e = case e of
                       return (Just (unReg tmp), tmp)
     emit (CALL conv tmp func' args')
     return res
+  _ -> error $ "Tac.munchExpr: " ++ show e
+  where
+    fallBackToIf tmp = do
+      munchStmt (SIf e (SAssign (EVar tmp) (EVar (mkInt 1)))
+                       (SAssign (EVar tmp) (EVar (mkInt 0))))
 
 mkInt :: Int -> Operand
 mkInt = OpImm . IntVal . fromIntegral

@@ -1,0 +1,22 @@
+#include "stdlib.cal"
+
+export "C" main;
+
+i64 a = 0;
+i64 b = 0;
+i64 refA = a;
+i64 manyRefs = {
+    a, b
+};
+
+main() {
+    i64[a] = 12345;
+    call "C/vararg" printf("&a = %p\n", a);
+    call "C/vararg" printf("a = %ld\n", i64[a]);
+    call "C/vararg" printf("refA = %p\n", i64[refA]);
+    call "C/vararg" printf("manyRefs[0] = %p, [1] = %p\n",
+                           i64[manyRefs], i64[manyRefs + 8]);
+    return 0;
+}
+
+

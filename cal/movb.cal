@@ -1,0 +1,23 @@
+#include "stdlib.cal"
+
+export "C" main;
+
+main() {
+    i64 s;
+    s = "hello\n";
+    call "C/vararg" printf(s);
+
+    i8[s] = 'b';
+    i8[s + 1] = 'y';
+    i8[s + 2] = 'e';
+    i8[s + 3] = ' ';
+    i8[s + 4] = ' ';
+    call "C/vararg" printf(s);
+
+    i64 c;
+    c = i8[s];
+    call "C/vararg" printf("%ld = '%c'\n", c, c);
+
+    return 0;
+}
+
