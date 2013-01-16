@@ -88,9 +88,9 @@ typedef struct {
     long prologueSavedRegs[5];  /* Offset of callee-save regs saved
                                    in the prologue of this function,
                                    or 0 if not saved */
-    uint8_t ptrContainingRegs;  /* Bitmap 0bXXX????? of callee-save
+    long ptrContainingRegs;     /* Bitmap 0bXXX????? of callee-save
                                    regs used by the callee and
-                                   living across this callsite */
+                                   escaped out of this callsite */
     long framePtrOffset;
     long numPtrs;
     long ptrOffsets[];

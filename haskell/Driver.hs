@@ -10,7 +10,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.List (zipWith4)
+import qualified Data.List as List
 import System.IO
 import System.Environment
 import Text.Dot
@@ -62,6 +62,7 @@ data OutputOpt
   | OutputOptZeroColor
   | OutputOptZeroRegAlloc
   | OutputOptZeroPlatGraph
+  | OutputOptZeroGcMap
   | OutputOptZero
 
 parseDriverOpt asimGs = parseOpt options asimGs emptyOption
@@ -79,6 +80,7 @@ parseDriverOpt asimGs = parseOpt options asimGs emptyOption
               , BoolOption ["--O0-color"] (setOutputLevel OutputOptZeroColor)
               , BoolOption ["--O0-ral"] (setOutputLevel OutputOptZeroRegAlloc)
               , BoolOption ["--O0-plat"] (setOutputLevel OutputOptZeroPlatGraph)
+              , BoolOption ["--O0-gcmap"] (setOutputLevel OutputOptZeroGcMap)
               , BoolOption ["--O0"] (setOutputLevel OutputOptZero)
               , BoolOption ["--cpp"] (\x -> return $ x { runCpp = True })
               , NamedStringOption ["-o"] setOutput
@@ -132,7 +134,8 @@ driverMain = do
 
 outputPass ( (prog, (exports, clobs, _), fs)
            , (iss, simDatas, simGs)
-           , (natGs, lvNatGs, interfGs, colors, ralGs, platNatGs)) = do
+           , (natGs, lvNatGs, interfGs, colors, ralGs, platNatGs,
+              rawGcMaps, gcMapDatas)) = do
   h <- asks optOutput
   level <- asks optOutputLevel
   case level of
@@ -156,9 +159,11 @@ outputPass ( (prog, (exports, clobs, _), fs)
       lift . hPutStrLn h . showDot . combine_dots $ dots
     OutputOptZeroRegAlloc -> output_flowGraphs ralGs
     OutputOptZeroPlatGraph -> output_flowGraphs platNatGs
+    OutputOptZeroGcMap -> output_gcMap rawGcMaps
     OutputOptZero -> do
       output_asm_export exports
       output_asm_data simDatas
+      output_asm_data gcMapDatas
       output_asm_code platNatGs
 
     where
@@ -198,6 +203,13 @@ outputPass ( (prog, (exports, clobs, _), fs)
       LSym (OpImm s) -> "\t.quad " ++ show (pprImm s)
       LArr lits -> unlines (map show_lit lits)
 
+    output_gcMap gcMaps = do
+      h <- asks optOutput
+      forM_ gcMaps $ \gcmap -> do
+        lift $
+          hPutStrLn h . show . vcat . punctuate comma . map pprGcMap $
+            gcmap
+
     output_asm_code graphs = do
       h <- asks optOutput
       let writeLn = lift . hPutStrLn h
@@ -211,6 +223,8 @@ outputPass ( (prog, (exports, clobs, _), fs)
           Foldable.mapM_ (writeLn . ("\t"++) . show . ppr) b
       where
         getBlockTrace ids bmap = map (bmap Map.!) ids
+
+
 
 runParsePass :: String -> Program String
 runParsePass = readProgram
@@ -258,14 +272,38 @@ runOptZeroPass (_, (_, clobs, _), _) (_, _, simGs) = do
   let natGs = map (Arch.evalMunchM . Arch.munchGraph) simGs
       lvNatGs = map Ral.iterLiveness natGs
   interfGs <- mapM Ral.buildGraph lvNatGs
-  let colors = map (Ral.color generalRegs) interfGs
+  let colors = map (Ral.color (reverse (generalRegs List.\\ clobs))) interfGs
       ralGs = zipWith3 Ral.materialize colors interfGs lvNatGs
-  platNatGs  <- sequence (zipWith4 Arch.evalFrameM
-                                   ralGs
-                                   (repeat clobs)
-                                   (map (Set.fromList . Map.elems) colors)
-                                   (repeat Arch.genPlatDepCode))
-  return (natGs, lvNatGs, interfGs, colors, ralGs, platNatGs)
+  (platNatGs, gcMaps) <- liftM unzip $ sequence (List.zipWith4
+                                    Arch.evalFrameM
+                                    ralGs
+                                    (repeat clobs)
+                                    (map (Set.fromList . Map.elems) colors)
+                                    (repeat Arch.genPlatDepCode))
+  
+  let rootName = "CaLang_GcMapRoot"
+      mkConcreteGcMap (GcMap retAddr saves escapes fp ptrs) = do
+        label <- newTempLabel "GcMap"
+        return $ LiteralData (i64, OpImm label)
+                             (LArr $ [LSym (OpImm retAddr)] ++
+                                     map LInt (mkPrologSave saves) ++
+                                     [LInt (mkEscapeBitmap escapes)] ++
+                                     [LInt (fromIntegral fp)] ++
+                                     [LInt (fromIntegral . length $ ptrs)] ++
+                                     map (LInt . fromIntegral) ptrs)
+      mkPrologSave saves = let saveMap = Map.fromList saves
+                            in map (\r -> fromIntegral
+                                     (Map.findWithDefault 0 r saveMap))
+                                   Arch.kCalleeSaves
+      mkEscapeBitmap escapes = 0
+
+  gcMapDatas <- mapM mkConcreteGcMap (concat gcMaps)
+  let rootMap = LiteralData (i64, OpImm (NamedLabel rootName))
+                            (LArr $ map getLabel gcMapDatas ++ [LInt 0])
+      getLabel (LiteralData (_, label) _) = LSym label
+
+  return (natGs, lvNatGs, interfGs, colors, ralGs, platNatGs,
+          gcMaps, rootMap:gcMapDatas)
 
 pprSignature (Func name asimGs _ _)
   = ppr name <> (parens (hcat (punctuate comma (map pprBinding asimGs))))

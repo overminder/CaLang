@@ -6,6 +6,7 @@ module Backend.Operand (
   pprReg, pprImm, pprAddr,
   pprWidth,
   pprCallingConvs,
+  pprGcMap,
 ) where
 
 import Data.Tuple (swap)
@@ -74,4 +75,13 @@ pprCallingConvs cs = if null cs
   where
     ppr_calling_conv c = text (callingConvToName Map.! c)
     callingConvToName = Map.fromList (map swap (Map.toList callingConvNames))
+
+pprGcMap (GcMap lbl prologSaves escapes fp ptrOffsets)
+  = text ".GcMap" <+> pprImm lbl <+> braces (
+      text "ptrs=" <> brackets (hsep (punctuate comma (map int ptrOffsets))) $$
+      text "fp=" <> int fp $$
+      text "saves=" <> brackets (vcat
+        (map (\(r, i) -> pprReg r <+> text "=>" <+> int i) prologSaves)) $$
+      text "escapes=" <> brackets (vcat
+        (map pprReg escapes)))
 

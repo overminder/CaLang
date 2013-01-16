@@ -16,11 +16,13 @@ module Backend.Common (
   Addr(..),
   Operand(..),
   CallingConv(..), parseCallingConv, callingConvNames,
+  GcMap(..),
 
   -- Used by codegen
   newRegV,
   newTempLabel,
   setOpWidth,
+  gcFlagOfReg,
 
   -- Used by regalloc
   mkUseOfSrc, mkDefOfSrc,
@@ -233,6 +235,22 @@ isLogicOp op = case op of
   LNot -> True
   _ -> False
 
+-- Platform independent (huh?) GcMap impl
+data GcMap
+  = GcMap {
+    gmLabel :: Imm, -- the label for return addr
+
+    -- callee-saved register saved in the prolog
+    gmPrologSavedRegs :: [(Reg, Int)],
+
+    -- escaped callee-saved registers that contain gcptrs
+    gmEscapedRegs :: [Reg],
+
+    gmFramePtrOffset :: Int, -- relative to &retAddr?
+
+    gmGcptrOffsets :: [Int] -- relative to rbp
+  }
+
 -- Commonly used
 newRegV :: MonadUnique m => StorageType -> m Operand
 newRegV (kls, width, gc) = do
@@ -276,6 +294,11 @@ replaceRegInOp f op = case op of
   OpImm _ -> op
   OpAddr (MkAddr mbBase mbIndex disp) ->
     OpAddr (MkAddr (fmap f mbBase) (fmap (first f) mbIndex) disp)
+
+gcFlagOfReg :: Reg -> GcFlag
+gcFlagOfReg r = case r of
+  RegP (PhysicalReg (rid, kls, _, gcf)) -> gcf
+  RegV (VirtualReg (rid, kls, _, gcf)) -> gcf
 
 copyGcFlag :: Reg -> Reg -> Reg
 copyGcFlag from to = to'

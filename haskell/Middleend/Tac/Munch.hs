@@ -83,6 +83,15 @@ munchStmt s = case s of
           RGe -> munchRel bop e1 e2 s_true s_false
           _ -> munchStmt (SIf (EBinary RNe e (EVar (mkInt 0))) s_true s_false)
       _ -> munchStmt (SIf (EBinary RNe e (EVar (mkInt 0))) s_true s_false)
+  SWhile e s -> do
+    lbl_loop <- newTempLabel "whileLoop"
+    lbl_end <- newTempLabel "whileEnd"
+    munchStmt $ SBlock ([SIf e (SJump (EVar (OpImm lbl_loop)))
+                               (SJump (EVar (OpImm lbl_end))),
+                         SLabel (OpImm lbl_loop)] ++ [s] ++
+                        [SIf e (SJump (EVar (OpImm lbl_loop)))
+                               (SBlock []),
+                         SLabel (OpImm lbl_end)])
   SBlock xs -> mapM_ munchStmt xs
   SReturn mbE -> do
     mbR <- mapM munchExpr mbE

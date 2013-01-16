@@ -1,3 +1,6 @@
+#include "stdlib.cal"
+
+export "C" main;
 
 sum(i64 n) {
     i64 i;
@@ -10,5 +13,10 @@ sum(i64 n) {
         s = s + i;
     }
     return s;
+}
+
+main() {
+    call "C/vararg" printf("sum 10 = %ld\n", call sum(10));
+    return 0;
 }
 

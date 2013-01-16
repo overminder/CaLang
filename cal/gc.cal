@@ -1,9 +1,19 @@
+#define INTOBJ_VTABLE 0
+#define SIZEOF_INTOBJ 16
 
-gcfunc(gcptr a) {
-    i64 b;
+import alloc, collect, logSomething;
 
-    b = a + 1;
+addInt(gcptr a, gcptr b) {
+    gcptr res;
 
-    return b;
+    res = call alloc(SIZEOF_INTOBJ);
+    if (!res) {
+        res = call collect(SIZEOF_INTOBJ);
+    }
+    i64[res    ] = INTOBJ_VTABLE;
+    i64[res + 8] = a + b;
+
+    call logSomething();
+    return res;
 }
 
