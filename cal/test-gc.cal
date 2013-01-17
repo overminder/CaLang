@@ -1,4 +1,21 @@
 #include "stdlib.cal"
+#include "gc.cal"
+
+export "C" main;
+
+main() {
+    gcptr a, b, c;
+
+    a = call mkInt(1);
+    call printObject(a);
+    b = call mkInt(2);
+    call printObject(b);
+
+    call "C" free(a);
+    call "C" free(b);
+
+    return 0;
+}
 
 i64 vtableOfInt = {
     sizeOfInt,
@@ -33,9 +50,5 @@ mkInt(i64 iVal) {
 
 alloc(i64 size) {
     call "C/tail" malloc(size);
-}
-
-main() {
-    return 0;
 }
 

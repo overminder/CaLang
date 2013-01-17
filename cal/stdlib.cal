@@ -1,3 +1,6 @@
+#ifndef STDLIB_CAL
+#define STDLIB_CAL
+
 import atoi, exit;
 import puts, printf;
 import free, malloc;
@@ -30,4 +33,6 @@ getArg(i64 argc, i64 argv, i64 default) {
         return default;
     }
 }
+
+#endif  /* STDLIB_CAL */
 

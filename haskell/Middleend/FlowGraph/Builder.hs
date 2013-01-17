@@ -5,11 +5,13 @@ module Middleend.FlowGraph.Builder (
   graphToDot,
   FlowGraph(..),
   BasicBlock(..), BlockId,
-  mkTrace,
 
-  hasNoSucc, getBlock, putBlock, getSuccBlockIds, getPredBlockIds,
-  firstInstrOfBlock,
+  hasNoSucc, hasNoPred,
+  getBlock, putBlock, getSuccBlockIds, getPredBlockIds,
+  firstInstrOfBlock, lastInstrOfBlock,
 ) where
+
+import Debug.Trace
 
 import Prelude hiding (mapM_)
 import Control.Applicative
@@ -223,51 +225,9 @@ firstInstrOfBlock :: BasicBlock a -> a
 firstInstrOfBlock b = case instrList b ++ toList (controlInstr b) of
   x:xs -> x
 
--- Linearize the basic blocks.
--- Note that the block should be simplified (E.g., every block contains a ctrl
--- instr)
--- We currently doesn't do jump elimination here.
-mkTrace :: Instruction instr => FlowGraph instr -> [BlockId]
-mkTrace g = go [entryBlock g] [] Set.empty
-  where
-    bmap = blockMap g
-    smap = succMap g
-    pmap = predMap g
-    go :: [BlockId] -> [BlockId] -> Set BlockId -> [BlockId]
-    go stk result visited = case stk of
-      [] -> result
-      x:xs -> case Set.member x visited of
-        True -> go xs result visited
-        False ->
-          let block = bmap Map.! x
-              Just ctrl = controlInstr block
-              succs = Map.findWithDefault Set.empty x smap
-              preds = Map.findWithDefault Set.empty x pmap
-              visited' = Set.insert x visited
-              -- Ensure that this block is topologically sorted.
-              -- XXX: Seems to be not quite right.
-              -- Let's consult Appel instead...
-              predNotYetVisited = preds Set.\\ visited' Set.\\ succs
-              result' = result ++ [x]
-              goNext = \xs' -> go xs' result' visited'
-           in if Set.null predNotYetVisited
-                -- All of the preds are visited, can visit this
-                then case Set.size succs of
-                       0 -> goNext xs
-                       1 -> case isFallThroughInstr ctrl of
-                              True -> goNext (Set.findMin succs : xs)
-                              False -> goNext (xs ++ [Set.findMin succs])
-                       _ -> case isFallThroughInstr ctrl of
-                         -- 2 or moar (SWITCH!) jump destinations
-                              True -> let (BlockLabel fallThroughBlock)
-                                            = getFallThroughTarget ctrl
-                                          theOtherBlock = Set.findMin (
-                                            Set.delete fallThroughBlock succs)
-                                       in goNext $ (fallThroughBlock:xs) ++
-                                          [theOtherBlock]
-                              False -> goNext $ xs ++ Set.toList succs
-                -- Put back
-                else go (Set.toList predNotYetVisited ++ x:xs) result visited
+lastInstrOfBlock :: BasicBlock a -> a
+lastInstrOfBlock b = case instrList b ++ toList (controlInstr b) of
+  xs -> last xs
 
 -- Dot file support
 graphToDot :: Ppr instr => FlowGraph instr -> Dot ()

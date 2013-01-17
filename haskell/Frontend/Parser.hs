@@ -33,6 +33,7 @@ languageDef
                                    , "export"
                                    , "import"
                                    , "register"
+                                   , "asm"
                                    ] ++ (map fst storageTypes)
              , T.reservedOpNames = words ("+ - * / = < <= > >= " ++
                                           "== != && || ! % ~ & | ^ " ++
@@ -247,9 +248,24 @@ pCall = do
 pArgs = parens $ sepBy pExpr comma
 
 pTerm = parens pExpr
+    <|> pAsmExpr
     <|> pMemDeref
     <|> liftM EVar ident
     <|> liftM ELit pLit
+
+pAsmExpr = do
+  reserved "asm"
+  regName <- parens strLit
+  case mkRegFromString regName of
+    Just r -> return $ EAsm r
+    Nothing -> fail $ "No such register: " ++ regName
+
+pMemDeref = do
+  mcls <- pStorageType
+  e <- brackets pExpr
+  return $ EUnary (MRef mcls) e
+
+pLit = pNumLit <|> pChrLit <|> pStrLit <|> pArrLit <|> pSymLit
 
 pNumLit = liftM mk_num numLit
   where
@@ -264,13 +280,6 @@ pArrLit = liftM LArr (braces (sepBy pLit comma))
     p_integral_lit = pNumLit <|> pChrLit <|> pStrLit <|> pSymLit
 
 pSymLit = liftM LSym ident
-
-pLit = pNumLit <|> pChrLit <|> pStrLit <|> pArrLit <|> pSymLit
-
-pMemDeref = do
-  mcls <- pStorageType
-  e <- brackets pExpr
-  return $ EUnary (MRef mcls) e
 
 pStorageType = foldr1 (<|>) (map p_type storageTypes)
   where

@@ -1,0 +1,36 @@
+#include "stdlib.cal"
+
+export "C" main;
+
+i64 frameBottom = 0;
+
+dumpStackTrace(i64 curr, i64 bottom) {
+    i64 i, goOn;
+
+    goOn = 1;
+    i = 0;
+    while (goOn) {
+        call "C/vararg" printf("#%ld: @%p|%p\n", i, curr, bottom);
+
+        if (curr >= bottom) {
+            goOn = 0;
+        }
+        else {
+            curr = i64[curr];
+            i = i + 1;
+        }
+    }
+}
+
+someFunc() {
+    i64 currFrame;
+
+    currFrame = asm("%rbp");
+    call dumpStackTrace(currFrame, i64[frameBottom]);
+}
+
+main() {
+    i64[frameBottom] = asm("%rbp");
+    call someFunc();
+}
+

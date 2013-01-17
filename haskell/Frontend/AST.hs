@@ -70,6 +70,7 @@ data Stmt a
 data Expr a
   = ELit (Lit a) -- A source language literal
   | EVar a -- A variable, whose information is described in tyVar a
+  | EAsm Reg -- Source-level assembly register
   | EBinary MachOp (Expr a) (Expr a) -- arith/rel/bool
   | EUnary MachOp (Expr a) -- not/neg
   | ECall [CallingConv] (Expr a) [Expr a] -- func [args..]
@@ -190,6 +191,7 @@ pprExpr :: Ppr a => Expr a -> Doc
 pprExpr e = case e of
   ELit lit -> pprLit lit
   EVar name -> ppr name
+  EAsm r -> text "asm" <> parens (pprReg r)
   EBinary op e1 e2 -> pprExpr e1 <+> pprBinaryOp op <+> pprExpr e2
   EUnary op e -> case op of
     ANeg -> char '-' <> parens (pprExpr e)

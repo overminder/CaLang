@@ -91,7 +91,6 @@ typedef struct {
     long ptrContainingRegs;     /* Bitmap 0bXXX????? of callee-save
                                    regs used by the callee and
                                    escaped out of this callsite */
-    long framePtrOffset;
     long numPtrs;
     long ptrOffsets[];
 } GcMap;
@@ -100,4 +99,9 @@ typedef struct {
     void *label;
     GcMap gcmap;
 } LabeledGcMap;
+
+typedef struct {
+    long numGcMaps;
+    LabeledGcMap *gcMaps[];
+} GcMapRoot;
 

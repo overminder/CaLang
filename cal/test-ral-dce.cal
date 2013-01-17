@@ -1,0 +1,8 @@
+export "C" main;
+
+main(i32 argc, i64 argv) {
+    i64 foo;
+    foo = argc + argv;
+    return 0;
+}
+

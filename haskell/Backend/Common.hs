@@ -58,12 +58,16 @@ class Instruction instr where
   isLabelInstr :: instr -> Bool
   getLabelOfInstr :: instr -> Imm
   isFallThroughInstr :: instr -> Bool
-  getFallThroughTarget :: instr -> Imm
+
+  -- Nothing if you need to find it by yourself in the flowgraph
+  getFallThroughTarget :: instr -> Maybe Imm
+
   mkJumpInstr :: Imm -> instr
   renameBranchInstrLabel :: (Imm -> Imm) -> instr -> instr
   getUseOfInstr :: instr -> [Reg]
   getDefOfInstr :: instr -> [Reg]
   replaceRegInInstr :: (Reg -> Reg) -> instr -> instr
+  isPureInstr :: instr -> Bool
 
 data Reg
   = RegV VirtualReg

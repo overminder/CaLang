@@ -21,6 +21,7 @@ instance Instruction Instr where
   getUseOfInstr = ir_getUseOfInstr
   getDefOfInstr = ir_getDefOfInstr
   replaceRegInInstr = ir_replaceRegInInstr
+  isPureInstr = ir_isPureInstr
 
 instance Ppr Instr where
   ppr = ppr_instr
@@ -116,7 +117,8 @@ ir_isFallThroughInstr i = case i of
   _ -> False
 
 ir_getFallThroughTarget i = case i of
-  JIF _ _ _ o2 -> o2
+  JIF _ _ _ o2 -> Just o2
+  CALL _ _ _ _ -> Nothing
 
 ir_mkJumpInstr = JMP
 
@@ -152,4 +154,10 @@ ir_getUseOfInstr instr = case instr of
       _ -> []
 
 ir_replaceRegInInstr _ _ = error $ "ir_replaceRegInInstr: not implemented"
+
+ir_isPureInstr i = case i of
+  MOV   _ _     -> True
+  UNROP _ _ _   -> True
+  BINOP _ _ _ _ -> True
+  _             -> False
 

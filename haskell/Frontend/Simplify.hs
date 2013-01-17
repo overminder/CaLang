@@ -10,6 +10,7 @@ module Frontend.Simplify (
 --  * Make and attach jump table for switch statement
 --  * Transform ELit nodes to EVar Operator nodes
 --  * Remove type declaration statements in functions
+--  * Append a return to the body of every function
 
 import Control.Monad.State
 import Control.Monad.Trans
@@ -62,7 +63,8 @@ simplifyFunc (Func name args body isC) = do
                         extractJumpTable,
                         liftNestedCall,
                         return . cleanLiteral,
-                        return . cleanDeclStmt]
+                        return . cleanDeclStmt,
+                        return . appendReturn]
                        body
   return $ Func name args body' isC
 
@@ -203,3 +205,4 @@ cleanLiteral = traverseExpr clean_lit
         mk_int = EVar . OpImm . IntVal
         mk_flo = EVar . OpImm . FloatVal
 
+appendReturn x = SBlock [x, SReturn Nothing]

@@ -1,5 +1,6 @@
 module Backend.RegAlloc.Liveness (
   iterLiveness,
+  iterDCE,
   Liveness(..),
   mkEmptyLiveness,
 ) where
@@ -47,6 +48,7 @@ instance Instruction a => Instruction (Liveness a) where
   replaceRegInInstr f (Liveness i ds us lin lout)
     = Liveness (replaceRegInInstr f i) (Set.map f ds) (Set.map f us)
                (Set.map f lin) (Set.map f lout)
+  isPureInstr = isPureInstr . instr
 
 pprRegSet = braces . hsep . punctuate comma . map pprReg . Set.toList
 
@@ -54,8 +56,8 @@ isSameLiveness :: Liveness a -> Liveness a -> Bool
 isSameLiveness a b = (liveIn a, liveOut a) == (liveIn b, liveOut b)
 
 iterLiveness :: Instruction a => Fg.FlowGraph a -> Fg.FlowGraph (Liveness a)
-iterLiveness rawGraph = runIdentity $
-  Fg.iterBwd calculateLiveness initialLivenessGraph
+iterLiveness rawGraph = fst . runIdentity $
+  Fg.iterAnalysis (Fg.Bwd calculateLiveness) initialLivenessGraph
   where
     initialLivenessGraph = fmap (getDefUse . mkEmptyLiveness) rawGraph
 
@@ -87,11 +89,22 @@ getDefUse liveness@(Liveness {instr=i}) = liveness {
 }
 
 -- Remove dead code so that regalloc can work fine
---doDCE :: Fg.BasicBlock (Liveness a) -> Fg.BasicBlock (Liveness a)
---doDCE b = b'
---  where
---    instrList' = filter (not . isDeadCode) instrList b
---    ctrl' = 
---    b' = undefined
+iterDCE :: Instruction a =>
+           Fg.FlowGraph (Liveness a) -> Fg.FlowGraph (Liveness a)
+iterDCE g =
+  let (g', changed) = runIdentity (Fg.iterAnalysis (Fg.Alter eliminateIfDead) g)
+   in if changed
+        then let (g'', _) = runIdentity (Fg.iterAnalysis
+                                          (Fg.Bwd calculateLiveness) g')
+              in iterDCE g''
+        else g
 
+eliminateIfDead :: (Monad m, Instruction a) =>
+                   Liveness a -> m ([Liveness a], Bool)
+eliminateIfDead i = case Set.toList (defs i) of
+  [] -> return ([i], False)
+  [d] -> do
+    if Set.notMember d (liveOut i) && isPureInstr (instr i)
+      then return ([], True)
+      else return ([i], False)
 

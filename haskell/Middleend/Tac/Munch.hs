@@ -90,7 +90,7 @@ munchStmt s = case s of
                                (SJump (EVar (OpImm lbl_end))),
                          SLabel (OpImm lbl_loop)] ++ [s] ++
                         [SIf e (SJump (EVar (OpImm lbl_loop)))
-                               (SBlock []),
+                               (SJump (EVar (OpImm lbl_end))),
                          SLabel (OpImm lbl_end)])
   SBlock xs -> mapM_ munchStmt xs
   SReturn mbE -> do
@@ -145,6 +145,7 @@ munchExpr e = case e of
       tmp <- newRegV i64
       emit (MOV (unReg tmp) op)
       return tmp
+  EAsm r -> return (OpReg r)
   EBinary bop e1 e2 -> do
     tmp <- newRegV i64
     if isLogicOp bop || isCondOp bop

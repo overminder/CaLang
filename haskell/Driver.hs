@@ -214,13 +214,16 @@ outputPass ( (prog, (exports, clobs, _), fs)
       h <- asks optOutput
       let writeLn = lift . hPutStrLn h
       forM_ graphs $ \g -> do
-        writeLn $ "\t.align 16"
+        let name = Fg.funcName g
+        writeLn $ "\t.p2align 4,,15"
         writeLn $ "\t.text"
-        writeLn $ Fg.funcName g ++ ":"
+        writeLn $ "\t.type " ++ name ++ ",@function"
+        writeLn $ name ++ ":"
         let blocks = getBlockTrace (Fg.blockTrace g) (Fg.blockMap g)
         forM_ blocks $ \b -> do
           writeLn $ show (pprImm (BlockLabel (Fg.blockId b))) ++ ":"
           Foldable.mapM_ (writeLn . ("\t"++) . show . ppr) b
+        writeLn $ "\t.size " ++ name ++ " ,.-" ++ name
       where
         getBlockTrace ids bmap = map (bmap Map.!) ids
 
@@ -270,7 +273,7 @@ runGraphPass (_, (_, _, datas), simFuncs) = do
 
 runOptZeroPass (_, (_, clobs, _), _) (_, _, simGs) = do
   let natGs = map (Arch.evalMunchM . Arch.munchGraph) simGs
-      lvNatGs = map Ral.iterLiveness natGs
+      lvNatGs = map (Ral.iterDCE . Ral.iterLiveness) natGs
   interfGs <- mapM Ral.buildGraph lvNatGs
   let assignMaps = map (Ral.allocPhysReg (reverse (generalRegs List.\\ clobs)))
                    interfGs
@@ -300,7 +303,8 @@ runOptZeroPass (_, (_, clobs, _), _) (_, _, simGs) = do
 
   gcMapDatas <- mapM mkConcreteGcMap (concat gcMaps)
   let rootMap = LiteralData (i64, OpImm (NamedLabel rootName))
-                            (LArr $ map getLabel gcMapDatas ++ [LInt 0])
+                            (LArr $ [LInt (fromIntegral (length gcMapDatas))] ++
+                                    map getLabel gcMapDatas)
       getLabel (LiteralData (_, label) _) = LSym label
 
   return (natGs, lvNatGs, interfGs, assignMaps, ralGs, platNatGs,

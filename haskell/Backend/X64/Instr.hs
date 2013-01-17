@@ -20,6 +20,7 @@ instance Instruction Instr where
   getUseOfInstr = x64_getUseOfInstr
   getDefOfInstr = x64_getDefOfInstr
   replaceRegInInstr = x64_replaceRegInInstr
+  isPureInstr = x64_isPureInstr
 
 instance Ppr Instr where
   ppr = ppr_instr
@@ -138,7 +139,7 @@ x64_getUseOfInstr instr = case instr of
 
   AND      o1 o2 -> mkUseOfSrc o1 ++ mkUseOfSrc  o2 ++ mkUseOfDest o2
   OR       o1 o2 -> mkUseOfSrc o1 ++ mkUseOfSrc  o2 ++ mkUseOfDest o2
-  XOR      o1 o2 -> if False --o1 == o2
+  XOR      o1 o2 -> if o1 == o2
                       then []
                       else mkUseOfSrc o1 ++ mkUseOfDest o2
   NOT      o1    -> mkUseOfSrc o1 ++ mkUseOfDest o1
@@ -175,9 +176,7 @@ x64_getDefOfInstr instr = case instr of
 
   AND      o1 o2 -> mkDefOfSrc o1 ++ mkDefOfDest o2
   OR       o1 o2 -> mkDefOfSrc o1 ++ mkDefOfDest o2
-  XOR      o1 o2 -> if o1 == o2
-                      then []
-                      else mkDefOfSrc o1 ++ mkDefOfDest o2
+  XOR      o1 o2 -> mkDefOfSrc o1 ++ mkDefOfDest o2
   NOT      o1    -> mkDefOfSrc o1 ++ mkDefOfDest o1
 
   SHL      o1 o2 -> mkDefOfSrc o1 ++ mkDefOfDest o2
@@ -240,6 +239,45 @@ x64_replaceRegInInstr f i = case i of
   _              -> i
   where
     f' = replaceRegInOp f
+
+-- `True' in the sense that this instr can be safely eliminated by the DCE.
+-- XXX: Assume a reg is defined in this instr. That is, memory store
+-- will always be treated as impure instr, without even calling this function.
+x64_isPureInstr i = case i of
+  MOV    w o1 o2 -> True
+  MOVZxQ w o1 o2 -> True
+  MOVSxQ w o1 o2 -> True
+
+  LEA      o1 o2 -> True
+
+  ADD      o1 o2 -> True
+  SUB      o1 o2 -> True
+  MUL      o1 o2 -> True
+  DIV      o1 o2 -> True
+  NEG      o1    -> True
+
+  AND      o1 o2 -> True
+  OR       o1 o2 -> True
+  XOR      o1 o2 -> True
+  NOT      o1    -> True
+
+  SHL      o1 o2 -> True
+  SAR      o1 o2 -> True
+  SHR      o1 o2 -> True
+
+  -- XXX flag regs?
+  TEST     o1 o2 -> True
+  CMP      o1 o2 -> True
+  CMOV   r o1 o2 -> True
+
+  PUSH     o1    -> False
+  POP      o1    -> False
+
+  JMP      o1 mc -> False
+  JXX      _  _  -> False
+  CALL     o1 c  -> False
+  RET      _     -> False
+  _              -> False
 
 -- Ppr impl
 

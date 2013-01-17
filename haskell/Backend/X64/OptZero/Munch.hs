@@ -11,6 +11,7 @@ import qualified Data.Map as Map
 
 import qualified Middleend.Tac.Instr as Tac
 import qualified Middleend.FlowGraph.Builder as Fg
+import qualified Middleend.FlowGraph.Trace as Fg
 import Backend.Operand
 import qualified Backend.X64.OptZero.Frame as F
 import Backend.X64.Instr
@@ -42,7 +43,8 @@ munchGraph g@(Fg.MkGraph name args isC entry _ blocks pm sm lm) = do
   -- Here we build a trace of the flow since Call may need to
   -- emit mov %rax, %dest to the next block.
   modify $ \st -> st { flowGraph = g }
-  let blockTrace = map (blocks Map.!) (Fg.mkTrace g)
+  let blockIdTrace = Fg.mkTrace g
+      blockTrace = map (blocks Map.!) blockIdTrace
   munchedBlocks <- forM blockTrace $ \block -> do
     instrs <- liftM2 (++) getAndClearPrevInstr
                           (execWriterT (munchBlock block))
@@ -53,7 +55,7 @@ munchGraph g@(Fg.MkGraph name args isC entry _ blocks pm sm lm) = do
       Fg.blockLabels = Fg.blockLabels block
     }
   let newBlockMap = Map.fromList (map mkBlockPair munchedBlocks)
-  return $ Fg.MkGraph name args isC entry (Fg.mkTrace g) newBlockMap pm sm lm
+  return $ Fg.MkGraph name args isC entry blockIdTrace newBlockMap pm sm lm
   where
     mkBlockPair b = (Fg.blockId b, b)
     getAndClearPrevInstr = do
@@ -143,8 +145,9 @@ munchInstr tac = case tac of
     (argLocs, preCallInstrs) <- mkArg args
     forM (zip args argLocs) $ \(src, dest) -> do
       emit (movq src dest)
+    let auxOp = if Vararg `elem` conv then [OpReg rax] else []
     tell preCallInstrs
-    emit (callInstr (isJust mbRes, argLocs))
+    emit (callInstr (isJust mbRes, auxOp ++ argLocs))
     case mbRes of
       Just dest -> addToNextBlock (movq (OpReg rax) (OpReg dest))
       Nothing -> return ()

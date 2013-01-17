@@ -9,9 +9,9 @@ endif
 
 " Keywords
 syn keyword CaLangKeyword if else while register return jump call switch
-syn keyword CaLangKeyword import export
+syn keyword CaLangKeyword import export asm
 syn keyword CaLangType gcptr i64 i32 i16 i8
-syn keyword CaLangConstant __FrameDescr__
+"syn keyword CaLangConstant __FrameDescr__
 syn match CaLangNumber '\<\d\+'
 syn region CaLangString start='"' end='"'
 syn match CaLangLabel '^\i*:'

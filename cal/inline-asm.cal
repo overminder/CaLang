@@ -1,0 +1,12 @@
+
+#include "stdlib.cal"
+
+export "C" main;
+
+main(i32 argc, i64 argv) {
+    i64 framePtr;
+
+    framePtr = asm("%rbp");
+    call "C/vararg" printf("%%rbp = %p\n", framePtr);
+}
+

@@ -1,6 +1,9 @@
 CALCC = ./Compile
 CC = gcc
 
+all :
+	echo "nothing to do..."
+
 %-c : %.s
 	$(CC) $< -o $@
 
