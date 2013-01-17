@@ -1,4 +1,6 @@
-import puts, printf, atoi, exit;
+import atoi, exit;
+import puts, printf;
+import free, malloc;
 
 #define EXPECT_TRUE(expr) \
     if (expr) { \

@@ -1,0 +1,41 @@
+#include "stdlib.cal"
+
+i64 vtableOfInt = {
+    sizeOfInt,
+    printInt
+};
+
+printObject(gcptr o) {
+    call i64[i64[o] + 8](o);
+    return;
+}
+
+sizeOfObject(gcptr o) {
+    call "tail" i64[i64[o]](o);
+}
+
+printInt(gcptr i) {
+    call "C/vararg" printf("#<Int %ld>", i64[i + 8]);
+    return;
+}
+
+sizeOfInt(gcptr i) {
+    return 16;
+}
+
+mkInt(i64 iVal) {
+    gcptr obj;
+    obj = call alloc(call sizeOfInt());
+    i64[obj    ] = vtableOfInt;
+    i64[obj + 8] = iVal;
+    return obj;
+}
+
+alloc(i64 size) {
+    call "C/tail" malloc(size);
+}
+
+main() {
+    return 0;
+}
+

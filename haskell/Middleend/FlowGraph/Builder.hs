@@ -8,6 +8,7 @@ module Middleend.FlowGraph.Builder (
   mkTrace,
 
   hasNoSucc, getBlock, putBlock, getSuccBlockIds, getPredBlockIds,
+  firstInstrOfBlock,
 ) where
 
 import Prelude hiding (mapM_)
@@ -198,8 +199,11 @@ addLabelMapping i b = do
 
 -- Accessors
 
-hasNoSucc :: BlockId -> FlowGraph a -> Bool
-hasNoSucc bid g = Set.null (getSuccBlockIds bid g)
+hasNoSucc :: FlowGraph a -> BlockId -> Bool
+hasNoSucc g bid = Set.null (getSuccBlockIds bid g)
+
+hasNoPred :: FlowGraph a -> BlockId -> Bool
+hasNoPred g bid = Set.null (getPredBlockIds bid g)
 
 getBlock :: BlockId -> FlowGraph a -> BasicBlock a
 getBlock bid g = (blockMap g) Map.! bid
@@ -214,6 +218,10 @@ getSuccBlockIds bid g = Map.findWithDefault Set.empty bid (succMap g)
 
 getPredBlockIds :: BlockId -> FlowGraph a -> Set BlockId
 getPredBlockIds bid g = Map.findWithDefault Set.empty bid (predMap g)
+
+firstInstrOfBlock :: BasicBlock a -> a
+firstInstrOfBlock b = case instrList b ++ toList (controlInstr b) of
+  x:xs -> x
 
 -- Linearize the basic blocks.
 -- Note that the block should be simplified (E.g., every block contains a ctrl

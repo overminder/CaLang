@@ -134,7 +134,7 @@ driverMain = do
 
 outputPass ( (prog, (exports, clobs, _), fs)
            , (iss, simDatas, simGs)
-           , (natGs, lvNatGs, interfGs, colors, ralGs, platNatGs,
+           , (natGs, lvNatGs, interfGs, assignMaps, ralGs, platNatGs,
               rawGcMaps, gcMapDatas)) = do
   h <- asks optOutput
   level <- asks optOutputLevel
@@ -152,7 +152,7 @@ outputPass ( (prog, (exports, clobs, _), fs)
     OutputOptZeroLiveness -> output_flowGraphs lvNatGs
     OutputOptZeroInterf -> output_interfGraphs interfGs
     OutputOptZeroColor -> do
-      let dots = map mkDot (zip interfGs colors)
+      let dots = map mkDot (zip interfGs assignMaps)
           mkDot (graph, color) = 
             let showVertex v = show $ pprReg (color Map.! v)
              in Ral.graphToDot graph showVertex
@@ -272,13 +272,14 @@ runOptZeroPass (_, (_, clobs, _), _) (_, _, simGs) = do
   let natGs = map (Arch.evalMunchM . Arch.munchGraph) simGs
       lvNatGs = map Ral.iterLiveness natGs
   interfGs <- mapM Ral.buildGraph lvNatGs
-  let colors = map (Ral.color (reverse (generalRegs List.\\ clobs))) interfGs
-      ralGs = zipWith3 Ral.materialize colors interfGs lvNatGs
+  let assignMaps = map (Ral.allocPhysReg (reverse (generalRegs List.\\ clobs)))
+                   interfGs
+      ralGs = zipWith3 Ral.assignPhysReg assignMaps interfGs lvNatGs
   (platNatGs, gcMaps) <- liftM unzip $ sequence (List.zipWith4
                                     Arch.evalFrameM
                                     ralGs
                                     (repeat clobs)
-                                    (map (Set.fromList . Map.elems) colors)
+                                    (map (Set.fromList . Map.elems) assignMaps)
                                     (repeat Arch.genPlatDepCode))
   
   let rootName = "CaLang_GcMapRoot"
@@ -302,7 +303,7 @@ runOptZeroPass (_, (_, clobs, _), _) (_, _, simGs) = do
                             (LArr $ map getLabel gcMapDatas ++ [LInt 0])
       getLabel (LiteralData (_, label) _) = LSym label
 
-  return (natGs, lvNatGs, interfGs, colors, ralGs, platNatGs,
+  return (natGs, lvNatGs, interfGs, assignMaps, ralGs, platNatGs,
           gcMaps, rootMap:gcMapDatas)
 
 pprSignature (Func name asimGs _ _)

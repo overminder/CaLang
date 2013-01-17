@@ -5,6 +5,7 @@ module Backend.RegAlloc.Liveness (
 ) where
 
 import Prelude hiding (foldr)
+import Control.Monad.Identity
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Foldable
@@ -14,6 +15,7 @@ import qualified Data.Map as Map
 import Text.PrettyPrint
 
 import qualified Middleend.FlowGraph.Builder as Fg
+import qualified Middleend.FlowGraph.Analysis as Fg
 import Backend.Operand
 import Utils.Class
 
@@ -52,29 +54,22 @@ isSameLiveness :: Liveness a -> Liveness a -> Bool
 isSameLiveness a b = (liveIn a, liveOut a) == (liveIn b, liveOut b)
 
 iterLiveness :: Instruction a => Fg.FlowGraph a -> Fg.FlowGraph (Liveness a)
-iterLiveness rawGraph = go exitBlockIds initialLivenessGraph
+iterLiveness rawGraph = runIdentity $
+  Fg.iterBwd calculateLiveness initialLivenessGraph
   where
-    exitBlockIds = filter hasNoSucc (Map.keys (Fg.blockMap rawGraph))
-    hasNoSucc = flip Fg.hasNoSucc rawGraph
     initialLivenessGraph = fmap (getDefUse . mkEmptyLiveness) rawGraph
 
-    -- Iteration starts from here
-    go :: Instruction a => [Fg.BlockId] ->
-          Fg.FlowGraph (Liveness a) -> Fg.FlowGraph (Liveness a)
-    go works g = case works of
-      [] -> g
-      bid:rest -> let b = Fg.getBlock bid g
-                      succBlocks = map (flip Fg.getBlock g)
-                                       (Set.toList (Fg.getSuccBlockIds bid g))
-                      succLiveIn = foldr Set.union Set.empty (
-                                     map liveInOfBlock succBlocks)
-                      (b', changed) = recalculateBlock b succLiveIn
-                   in if changed || (null (Fg.instrList b))
-                      -- Propagate anyways if b is empty
-                        then go (rest ++ (Set.toList
-                                           (Fg.getPredBlockIds bid g)))
-                                (Fg.putBlock b' g)
-                        else go rest g
+-- Transfer function
+calculateLiveness :: (Monad m, Instruction a) =>
+                     Liveness a -> [Liveness a] -> m (Liveness a, Bool)
+calculateLiveness this succs = return (this', changed)
+  where
+    nextLiveIn = foldr Set.union Set.empty (map liveIn succs)
+    this' = this {
+      liveOut = nextLiveIn,
+      liveIn = uses this `Set.union` (nextLiveIn Set.\\ defs this)
+    }
+    changed = this' `isSameLiveness` this
 
 mkEmptyLiveness :: a -> Liveness a
 mkEmptyLiveness i = Liveness {
@@ -91,26 +86,12 @@ getDefUse liveness@(Liveness {instr=i}) = liveness {
   uses = Set.fromList (getUseOfInstr i)
 }
 
-liveInOfBlock :: Fg.BasicBlock (Liveness a) -> Set Reg
-liveInOfBlock b = case Fg.instrList b ++ toList (Fg.controlInstr b) of
-  x:xs -> liveIn x
+-- Remove dead code so that regalloc can work fine
+--doDCE :: Fg.BasicBlock (Liveness a) -> Fg.BasicBlock (Liveness a)
+--doDCE b = b'
+--  where
+--    instrList' = filter (not . isDeadCode) instrList b
+--    ctrl' = 
+--    b' = undefined
 
-recalculateBlock :: Fg.BasicBlock (Liveness a) ->
-                    Set Reg -> (Fg.BasicBlock (Liveness a), Bool)
-recalculateBlock b succLiveIns = (b', changed)
-  where
-    iter (nextIn, changed) thisLv
-      = let thisLv' = calculateLiveness nextIn thisLv
-            changed' = changed || not (isSameLiveness thisLv thisLv')
-         in ((liveIn thisLv', changed'), thisLv')
-    ((_, changed), b') = mapAccumR iter (succLiveIns, False) b
-
--- Transfer function
-calculateLiveness :: Set Reg -> Liveness a -> Liveness a
-calculateLiveness nextLiveIn this = this'
-  where
-    this' = this {
-      liveOut = nextLiveIn,
-      liveIn = uses this `Set.union` (nextLiveIn Set.\\ defs this)
-    }
 

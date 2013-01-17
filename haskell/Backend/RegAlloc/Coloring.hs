@@ -1,6 +1,6 @@
 module Backend.RegAlloc.Coloring (
-  color,
-  materialize,
+  allocPhysReg,
+  assignPhysReg,
 ) where
 
 import Control.Monad.State
@@ -17,8 +17,8 @@ import Backend.Operand
 type GraphStack = [(VertexId, Set VertexId)]
 
 -- We assume no spill/reload is need ATM.
-color :: [Reg] -> Graph -> Map VertexId Reg
-color physRegs g = rebuild simplified g Map.empty
+allocPhysReg :: [Reg] -> Graph -> Map VertexId Reg
+allocPhysReg physRegs g = rebuild simplified g Map.empty
   where
     simplified = simplify g []
 
@@ -48,9 +48,9 @@ color physRegs g = rebuild simplified g Map.empty
             x:_ -> x
             [] -> error $ "findUsableReg: out of regs!"
 
-materialize :: Instruction a => Map VertexId Reg -> Graph ->
+assignPhysReg :: Instruction a => Map VertexId Reg -> Graph ->
                Fg.FlowGraph a -> Fg.FlowGraph a
-materialize assign interfGraph flowGraph
+assignPhysReg assign interfGraph flowGraph
   = fmap (replaceRegInInstr replacer) flowGraph
   where
     replacer r
@@ -59,9 +59,9 @@ materialize assign interfGraph flowGraph
                  Just v -> case Map.lookup v assign of
                    Just r' -> copyGcFlag r . copyOpWidth r $ r'
                    Nothing ->
-                     error $ "materialize: Reg not allocated for " ++ show r
+                     error $ "assignPhysReg: Reg not allocated for " ++ show r
                  Nothing ->
-                   error $ "materialize: No liveness info for reg " ++ show r
+                   error $ "assignPhysReg: No liveness info for reg " ++ show r
           else r
 
 
