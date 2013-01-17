@@ -61,6 +61,8 @@ data Stmt a
   | SWhile (Expr a) (Stmt a)
   | SBlock [Stmt a]
   | SReturn (Maybe (Expr a))
+  | SContinue
+  | SBreak
   | SJump (Expr a)
   | SExpr (Expr a)
   | SLabel a
@@ -173,6 +175,8 @@ pprStmt s = case s of
                  pprStmt s1 $$
                  text "else" <+> pprStmt s2
   SWhile e s -> text "while" <+> pprExpr e <+> pprStmt s
+  SContinue -> text "continue" <> semi
+  SBreak -> text "break" <> semi
   SBlock xs -> braces (nest 4 (vcat (map pprStmt xs)))
   SReturn me -> text "return" <+> (case me of
     Just e -> pprExpr e
@@ -241,6 +245,8 @@ traverseExprM f s = case s of
   SSwitch e xs tab -> do
     e' <- f e
     return $ SSwitch e' xs tab
+  SContinue -> return SContinue
+  SBreak -> return SBreak
 
 traverseExpr :: (Expr a -> Expr a) -> Stmt a -> Stmt a
 traverseExpr f s = runIdentity (traverseExprM (return . f) s)
@@ -283,4 +289,6 @@ liftExprM f s = do
     SSwitch e labels tab -> do
       (e', ss) <- f e
       return $ ss ++ [SSwitch e' labels tab]
+    SContinue -> return [SContinue]
+    SBreak -> return [SBreak]
 

@@ -6,7 +6,7 @@ module Middleend.Tac.Munch (
 -- Direct translation from AST to Tac instruction
 
 import Prelude hiding (mapM)
-import Control.Monad.Writer hiding (mapM)
+import Control.Monad.RWS hiding (mapM)
 import Data.Traversable
 
 import Frontend.AST
@@ -15,10 +15,12 @@ import Backend.Operand
 import Utils.Unique
 
 type CompilerM = UniqueM
-type MunchM = WriterT [Instr] CompilerM
+type MunchM = RWST WhileStack [Instr] () CompilerM
+
+type WhileStack = [(Imm, Imm)] -- (goto loop, goto end)
 
 runMunchM :: MunchM a -> CompilerM [Instr]
-runMunchM = execWriterT
+runMunchM m = liftM snd (execRWST m [] ())
 
 munch :: Stmt Operand -> MunchM ()
 munch body = do
@@ -83,15 +85,14 @@ munchStmt s = case s of
           RGe -> munchRel bop e1 e2 s_true s_false
           _ -> munchStmt (SIf (EBinary RNe e (EVar (mkInt 0))) s_true s_false)
       _ -> munchStmt (SIf (EBinary RNe e (EVar (mkInt 0))) s_true s_false)
-  SWhile e s -> do
-    lbl_loop <- newTempLabel "whileLoop"
-    lbl_end <- newTempLabel "whileEnd"
-    munchStmt $ SBlock ([SIf e (SJump (EVar (OpImm lbl_loop)))
-                               (SJump (EVar (OpImm lbl_end))),
-                         SLabel (OpImm lbl_loop)] ++ [s] ++
-                        [SIf e (SJump (EVar (OpImm lbl_loop)))
-                               (SJump (EVar (OpImm lbl_end))),
-                         SLabel (OpImm lbl_end)])
+  SWhile e s -> 
+    withWhileBlock $ \lbl_loop lbl_end -> do
+      munchStmt $ SBlock ([SIf e (SJump (EVar (OpImm lbl_loop)))
+                                 (SJump (EVar (OpImm lbl_end))),
+                           SLabel (OpImm lbl_loop)] ++ [s] ++
+                          [SIf e (SJump (EVar (OpImm lbl_loop)))
+                                 (SJump (EVar (OpImm lbl_end))),
+                           SLabel (OpImm lbl_end)])
   SBlock xs -> mapM_ munchStmt xs
   SReturn mbE -> do
     mbR <- mapM munchExpr mbE
@@ -116,7 +117,27 @@ munchStmt s = case s of
                                              e
                                              (EVar (mkInt 3)))))
     emit (CASEJUMP r (map (\(OpImm i) -> i) lbls))
+
+  SContinue -> do
+    (lbl_loop, _) <- getLastWhile
+    emit (JMP lbl_loop)
+
+  SBreak -> do
+    (_, lbl_end) <- getLastWhile
+    emit (JMP lbl_end)
+
   _ -> error $ "Munch.munchStmt: " ++ show s
+  where
+    withWhileBlock m = do 
+      lbl_loop <- newTempLabel "whileLoop"
+      lbl_end <- newTempLabel "whileEnd"
+      local ((lbl_loop, lbl_end) :) $ do
+        m lbl_loop lbl_end
+    getLastWhile = do
+      stk <- ask
+      case stk of
+        [] -> error "Tac.munch: continue/break outside while stack"
+        x:_ -> return x
 
 munchRel :: MachOp -> Expr Operand -> Expr Operand -> 
             Stmt Operand -> Stmt Operand -> MunchM ()

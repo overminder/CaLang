@@ -26,6 +26,8 @@ languageDef
              , T.reservedNames   = [ "if"
                                    , "else"
                                    , "while"
+                                   , "continue"
+                                   , "break"
                                    , "return"
                                    , "call"
                                    , "jump"
@@ -130,6 +132,8 @@ pStmt = braces pStmtList <|> pCompoundStmt
 
 pCompoundStmt = pIfStmt
             <|> pWhileStmt
+            <|> pContinueStmt
+            <|> pBreakStmt
             <|> pReturnStmt
             <|> pJumpStmt
             <|> pSwitchStmt
@@ -157,6 +161,9 @@ pWhileStmt = do
   cond <- pExpr
   body <- pStmt
   return $ SWhile cond body
+
+pContinueStmt = reserved "continue" >> semi >> return SContinue
+pBreakStmt = reserved "break" >> semi >> return SBreak
 
 pReturnStmt = do
   reserved "return"

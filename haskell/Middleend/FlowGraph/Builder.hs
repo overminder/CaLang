@@ -11,8 +11,6 @@ module Middleend.FlowGraph.Builder (
   firstInstrOfBlock, lastInstrOfBlock,
 ) where
 
-import Debug.Trace
-
 import Prelude hiding (mapM_)
 import Control.Applicative
 import Data.Foldable
