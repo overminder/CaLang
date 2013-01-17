@@ -69,7 +69,7 @@ calculateLiveness this succs = return (this', changed)
       liveOut = nextLiveIn,
       liveIn = uses this `Set.union` (nextLiveIn Set.\\ defs this)
     }
-    changed = this' `isSameLiveness` this
+    changed = not (this' `isSameLiveness` this)
 
 mkEmptyLiveness :: a -> Liveness a
 mkEmptyLiveness i = Liveness {
