@@ -1,12 +1,13 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, FlexibleContexts,
+{-# LANGUAGE FlexibleInstances,
+             FlexibleContexts,
              UndecidableInstances #-}
 module Utils.Unique (
-  Unique,
   MonadUnique,
-  liftU,
+  UniqueM(..),
+  Unique,
+
+  evalUniqueM,
   mkUnique,
-  UniqueM,
-  evalUniqueM
 ) where
 
 import Control.Monad.Trans

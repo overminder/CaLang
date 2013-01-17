@@ -13,8 +13,6 @@ typedef struct {
 
 struct RootFinderStruct {
     FrameDescr frame;
-    int8_t justLeftRuntime;
-    int8_t 
     long stackIter;
     long regIter;
 };

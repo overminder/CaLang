@@ -1,7 +1,7 @@
 
-.globl prepareCollection
+.globl CaLang_PrepareCollection
 
-prepareCollection:
+CaLang_PrepareCollection:
 	push %rbp
 	mov %rsp, %rbp
 	sub sizeof_RootFinder, %rsp

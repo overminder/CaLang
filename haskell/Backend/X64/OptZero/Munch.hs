@@ -160,7 +160,7 @@ addToNextBlock instr = modifyInstrForNextBlock $ \mbi -> case mbi of
 
 assertArgLength args = if length args > 6 then error "too many args" else args
 mkCArg args = do
-  return $ (zipWith const F.kArgRegs (assertArgLength args), [])
+  return $ (zipWith const (map OpReg F.kArgRegs) (assertArgLength args), [])
 mkCVararg args = do
   (locs, _) <- mkCArg args
   return (locs, [XOR (OpReg eax) (OpReg eax)])

@@ -275,7 +275,7 @@ runOptZeroPass (_, (_, clobs, _), _) (_, _, simGs) = do
   let natGs = map (Arch.evalMunchM . Arch.munchGraph) simGs
       lvNatGs = map (Ral.iterDCE . Ral.iterLiveness) natGs
   interfGs <- mapM Ral.buildGraph lvNatGs
-  let assignMaps = map (Ral.allocPhysReg (reverse (generalRegs List.\\ clobs)))
+  let assignMaps = map (Ral.allocPhysReg ((generalRegs List.\\ clobs)))
                    interfGs
       ralGs = zipWith3 Ral.assignPhysReg assignMaps interfGs lvNatGs
   (platNatGs, gcMaps) <- liftM unzip $ sequence (List.zipWith4
@@ -299,7 +299,7 @@ runOptZeroPass (_, (_, clobs, _), _) (_, _, simGs) = do
                             in map (\r -> fromIntegral
                                      (Map.findWithDefault 0 r saveMap))
                                    Arch.kCalleeSaves
-      mkEscapeBitmap escapes = 0
+      mkEscapeBitmap escapes = 157
 
   gcMapDatas <- mapM mkConcreteGcMap (concat gcMaps)
   let rootMap = LiteralData (i64, OpImm (NamedLabel rootName))

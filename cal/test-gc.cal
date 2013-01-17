@@ -3,18 +3,73 @@
 
 export "C" main;
 
+i64 frameBottom = 0;
+
 main() {
-    gcptr a, b, c;
+    gcptr a;
+
+    i64[frameBottom] = asm("%rbp");
+
+    call "C" puts("at main, calling stacktrace...");
+    call stackTrace(i64[frameBottom]);
 
     a = call mkInt(1);
     call printObject(a);
-    b = call mkInt(2);
-    call printObject(b);
+
+    call "C" puts("at main again, calling stacktrace...");
+    call stackTrace(i64[frameBottom]);
+
+    call printObject(a);
 
     call "C" free(a);
-    call "C" free(b);
 
     return 0;
+}
+
+stackTrace(i64 to) {
+    i64 from, i;
+
+    from = asm("%rbp");
+    i = 0;
+    while (1) {
+        i64 gcMap;
+
+        gcMap = call lookupGcMap(i64[from + 8]);
+        call "C/vararg" printf("#%ld: @%p|%p, gcmap=%p\n",
+                               i, from, to, gcMap);
+        if (gcMap) {
+            //call pprGcMap(gcMap);
+            if (i64[gcMap + 64] == 1) {
+                i64 someOffset, someLoc, somePtr;
+
+                someOffset = i64[gcMap + 72];
+                /* Since it's stored in the previous frame, we need to
+                   get the prev frame ptr as the base */
+                someLoc = i64[from] + someOffset;
+                somePtr = i64[someLoc];
+                call "C/vararg" printf(
+                  "found a ptr at fp[%ld] (@%p, = %p), lets tweak it a bit\n",
+                  someOffset, someLoc, somePtr);
+
+                /* Replace with another int :P */
+                i64 tmp;
+                tmp = call "C" malloc(16);
+                call "C" free(somePtr);
+                somePtr = tmp;
+                i64[somePtr    ] = vtableOfInt;
+                i64[somePtr + 8] = 54321;
+                i64[someLoc] = somePtr;
+            }
+        }
+
+        if (from >= to) {
+            break;
+        }
+        else {
+            from = i64[from];
+            i = i + 1;
+        }
+    }
 }
 
 i64 vtableOfInt = {
@@ -32,7 +87,7 @@ sizeOfObject(gcptr o) {
 }
 
 printInt(gcptr i) {
-    call "C/vararg" printf("#<Int %ld>", i64[i + 8]);
+    call "C/vararg" printf("#<Int @%p %ld>\n", i, i64[i + 8]);
     return;
 }
 
@@ -49,6 +104,8 @@ mkInt(i64 iVal) {
 }
 
 alloc(i64 size) {
+    call "C" puts("at alloc/mkInt/main, calling stacktrace...");
+    call stackTrace(i64[frameBottom]);
     call "C/tail" malloc(size);
 }
 

@@ -325,7 +325,7 @@ mkBaseAddr base = MkAddr {
   dispOfAddr = Nothing
 }
 
-kArgRegs = map OpReg [rdi, rsi, rdx, rcx, r8, r9]
+kArgRegs = [rdi, rsi, rdx, rcx, r8, r9]
 
 kCalleeSaves = [rbx, r12, r13, r14, r15]
 

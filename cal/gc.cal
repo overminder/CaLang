@@ -1,5 +1,41 @@
+#ifndef GC_CAL
+#define GC_CAL
+
 #include "stdlib.cal"
 
 import CaLang_GcMapRoot;
+import CaLang_PrepareCollection;
 
+lookupGcMap(i64 retAddr) {
+    i64 end, iter;
+    
+    iter = CaLang_GcMapRoot + 8;
+    end = iter + (i64[CaLang_GcMapRoot] << 3);
 
+    while (iter < end) {
+        i64 curr;
+
+        curr = i64[iter];
+        if (i64[curr] == retAddr) {
+            return curr;
+        }
+        else {
+            iter = iter + 8;
+        }
+    }
+    return 0;
+}
+
+pprGcMap(i64 gcMap) {
+    i64 i;
+
+    i = 0;
+    call "C/vararg" printf(".GcMap @%p {\n", gcMap);
+    while (i < 72) {
+        call "C/vararg" printf("  i64[%ld] = %p\n", i, i64[gcMap + i]);
+        i = i + 8;
+    }
+    call "C/vararg" printf("}\n");
+}
+
+#endif  /* GC_CAL */
