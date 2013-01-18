@@ -1,3 +1,4 @@
+{-# LANGUAGE RankNTypes #-}
 module Driver (
   driverMain
 ) where
@@ -5,6 +6,7 @@ module Driver (
 import Control.Monad
 import Control.Monad.Trans
 import Control.Monad.Reader
+import Control.Monad.State
 import qualified Data.Foldable as Foldable
 import Data.Set (Set)
 import qualified Data.Set as Set
@@ -31,6 +33,7 @@ import qualified Backend.HOST_ARCH.OptZero.Munch as Arch
 import qualified Backend.HOST_ARCH.OptZero.Frame as Arch
 import qualified Backend.RegAlloc.Liveness as Ral
 import qualified Backend.RegAlloc.Interference as Ral
+import qualified Backend.RegAlloc.Coalescing as Ral
 import qualified Backend.RegAlloc.Coloring as Ral
 import Utils.Unique
 import Utils.Class
@@ -43,6 +46,7 @@ data Option
     optOutput :: Handle,
     optOutputFile :: String,
     optOutputLevel :: OutputOpt,
+    optDebugFuel :: Int,
     runCpp :: Bool
   }
 
@@ -57,8 +61,12 @@ data OutputOpt
   | OutputLocOptDot
 
   | OutputOptZeroDot
+
   | OutputOptZeroLiveness
   | OutputOptZeroInterf
+  | OutputOptZeroCoal
+  | OutputOptZeroCoalInterf
+
   | OutputOptZeroColor
   | OutputOptZeroRegAlloc
   | OutputOptZeroPlatGraph
@@ -67,7 +75,15 @@ data OutputOpt
 
 parseDriverOpt asimGs = parseOpt options asimGs emptyOption
   where
-    emptyOption = Option stdin "<stdin>" stdout "<stdout>" OutputNothing False
+    emptyOption = Option {
+      optInput = stdin,
+      optInputFile = "<stdin>",
+      optOutput = stdout,
+      optOutputFile = "<stdout>",
+      optOutputLevel = OutputNothing,
+      optDebugFuel = 10,
+      runCpp = False
+    }
     setOutputLevel wat = \x -> return $ x { optOutputLevel = wat }
     options = [ BoolOption ["--rdrprog"] (setOutputLevel OutputRdrProg)
               , BoolOption ["--frsim"] (setOutputLevel OutputFrSim)
@@ -77,6 +93,9 @@ parseDriverOpt asimGs = parseOpt options asimGs emptyOption
               , BoolOption ["--O0-dot"] (setOutputLevel OutputOptZeroDot)
               , BoolOption ["--O0-lv"] (setOutputLevel OutputOptZeroLiveness)
               , BoolOption ["--O0-interf"] (setOutputLevel OutputOptZeroInterf)
+              , BoolOption ["--O0-coal"] (setOutputLevel OutputOptZeroCoal)
+              , BoolOption ["--O0-coal-interf"] (setOutputLevel
+                                                    OutputOptZeroCoalInterf)
               , BoolOption ["--O0-color"] (setOutputLevel OutputOptZeroColor)
               , BoolOption ["--O0-ral"] (setOutputLevel OutputOptZeroRegAlloc)
               , BoolOption ["--O0-plat"] (setOutputLevel OutputOptZeroPlatGraph)
@@ -84,6 +103,7 @@ parseDriverOpt asimGs = parseOpt options asimGs emptyOption
               , BoolOption ["--O0"] (setOutputLevel OutputOptZero)
               , BoolOption ["--cpp"] (\x -> return $ x { runCpp = True })
               , NamedStringOption ["-o"] setOutput
+              , NamedStringOption ["--fuel"] setDebugFuel
               , StringOption setInput
               ]
     setInput path opt = case path of
@@ -100,8 +120,9 @@ parseDriverOpt asimGs = parseOpt options asimGs emptyOption
         return $ opt { optOutput = h
                      , optOutputFile = path
                      }
+    setDebugFuel w opt = return $ opt { optDebugFuel = read w }
 
-runAllPasses s = evalUniqueM $ do
+runAllPasses s = do
   let rdrProg = runParsePass s
   frRes <- runFrontendPass rdrProg
   grRes <- runGraphPass frRes
@@ -127,14 +148,15 @@ driverMain = do
                         lift $ macroPass [] cppOption cppd'
                 else return src
     --lift $ hPutStr stderr cppSrc
-    let result = runAllPasses cppSrc
+    let result = evalUniqueM (flip runReaderT opt (runAllPasses cppSrc))
     outputPass result
     h <- asks optOutput
     lift $ hClose h
 
 outputPass ( (prog, (exports, clobs, _), fs)
            , (iss, simDatas, simGs)
-           , (natGs, lvNatGs, interfGs, assignMaps, ralGs, platNatGs,
+           , (natGs, (lvNatGs, interfGs), (coalNatGs, coalInterfGs),
+              assignMaps, ralGs, platNatGs,
               rawGcMaps, gcMapDatas)) = do
   h <- asks optOutput
   level <- asks optOutputLevel
@@ -151,6 +173,8 @@ outputPass ( (prog, (exports, clobs, _), fs)
     OutputOptZeroDot -> output_flowGraphs natGs
     OutputOptZeroLiveness -> output_flowGraphs lvNatGs
     OutputOptZeroInterf -> output_interfGraphs interfGs
+    OutputOptZeroCoal -> output_flowGraphs coalNatGs
+    OutputOptZeroCoalInterf -> output_interfGraphs coalInterfGs
     OutputOptZeroColor -> do
       let dots = map mkDot (zip interfGs assignMaps)
           mkDot (graph, color) = 
@@ -233,16 +257,16 @@ runParsePass :: String -> Program String
 runParsePass = readProgram
 
 runFrontendPass :: Program String ->
-                   UniqueM (Program String,
-                            ([String], [Reg], [Data Operand]),
-                            [Func Operand])
+                   ReaderT Option UniqueM (Program String,
+                                           ([String], [Reg], [Data Operand]),
+                                           [Func Operand])
 runFrontendPass rdrProg = do
-  (rnDatas, rnFuncs, exports, clobRegs) <- runRenameM (rename rdrProg)
-  (simDatas, simFuncs) <- Sim.runSimplifyM (Sim.simplify rnDatas rnFuncs)
+  (rnDatas, rnFuncs, exports, clobRegs) <- lift $ runRenameM (rename rdrProg)
+  (simDatas, simFuncs) <- lift $ Sim.runSimplifyM (Sim.simplify rnDatas rnFuncs)
   return (rdrProg, (exports, clobRegs, simDatas), simFuncs)
 
 runGraphPass (_, (_, _, datas), simFuncs) = do
-  (insnss, rawGraphs) <- liftM unzip $ mapM mkInstrAndGraph simFuncs
+  (insnss, rawGraphs) <- lift $ liftM unzip $ mapM mkInstrAndGraph simFuncs
   let simGraphs = map Fg.simplify rawGraphs
   --locOptGrs <- mapM Tac.runOpt simGraphs
 
@@ -272,13 +296,23 @@ runGraphPass (_, (_, _, datas), simFuncs) = do
   unReg (OpReg r) = r
 
 runOptZeroPass (_, (_, clobs, _), _) (_, _, simGs) = do
+  fuel <- asks optDebugFuel
   let natGs = map (Arch.evalMunchM . Arch.munchGraph) simGs
-      lvNatGs = map (Ral.iterDCE . Ral.iterLiveness) natGs
-  interfGs <- mapM Ral.buildGraph lvNatGs
+      rawLvNatGs = map (Ral.iterDCE . Ral.iterLiveness) natGs
+  rawInterfGs <- lift $ mapM Ral.buildGraph rawLvNatGs
+  (coalNatGs, coalInterfGs) <- lift $ flip evalStateT fuel $ do
+    let graphPairs = zip rawLvNatGs rawInterfGs
+    coalGraphPairs <- forM graphPairs $ \(fg, ig) -> do
+      (fg', ig') <- Ral.coalesce fg ig
+      return (fg', ig')
+    return (unzip coalGraphPairs)
+  --(coalNatGs, coalInterfGs) <- lift $ flip runReaderT fuel $
+  --                               liftM unzip (sequence
+  --                               (zipWith Ral.coalesce rawLvNatGs rawInterfGs))
   let assignMaps = map (Ral.allocPhysReg ((generalRegs List.\\ clobs)))
-                   interfGs
-      ralGs = zipWith3 Ral.assignPhysReg assignMaps interfGs lvNatGs
-  (platNatGs, gcMaps) <- liftM unzip $ sequence (List.zipWith4
+                       coalInterfGs
+      ralGs = zipWith3 Ral.assignPhysReg assignMaps coalInterfGs coalNatGs
+  (platNatGs, gcMaps) <- lift $ liftM unzip $ sequence (List.zipWith4
                                     Arch.evalFrameM
                                     ralGs
                                     (repeat clobs)
@@ -301,14 +335,14 @@ runOptZeroPass (_, (_, clobs, _), _) (_, _, simGs) = do
                                    Arch.kCalleeSaves
       mkEscapeBitmap escapes = 157
 
-  gcMapDatas <- mapM mkConcreteGcMap (concat gcMaps)
+  gcMapDatas <- lift $ mapM mkConcreteGcMap (concat gcMaps)
   let rootMap = LiteralData (i64, OpImm (NamedLabel rootName))
                             (LArr $ [LInt (fromIntegral (length gcMapDatas))] ++
                                     map getLabel gcMapDatas)
       getLabel (LiteralData (_, label) _) = LSym label
 
-  return (natGs, lvNatGs, interfGs, assignMaps, ralGs, platNatGs,
-          gcMaps, rootMap:gcMapDatas)
+  return (natGs, (rawLvNatGs, rawInterfGs), (coalNatGs, coalInterfGs),
+          assignMaps, ralGs, platNatGs, gcMaps, rootMap:gcMapDatas)
 
 pprSignature (Func name asimGs _ _)
   = ppr name <> (parens (hcat (punctuate comma (map pprBinding asimGs))))

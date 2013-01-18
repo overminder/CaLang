@@ -1,0 +1,7 @@
+export "C" main;
+
+main(i64 argc) {
+    return argc;
+}
+
+

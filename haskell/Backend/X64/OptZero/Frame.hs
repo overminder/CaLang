@@ -133,6 +133,13 @@ insertCallSiteRegSave block = do
               prepender xs = case xs of
                 -- HACK. Note that CALL will insert a mov %rax, xxx,
                 -- we need to prepend restore instr after that.
+                -- XXX conflict with register coalescing:
+                -- Coalescing will cause mov %rax, xxx to go away
+                -- and therefore if the first followed instr uses
+                -- saved register, things will go wrong.
+                -- Current solution is to replace mov %rax, xxx to
+                -- NOP instead in the coalescing process. I need
+                -- to come up with a better way to do this though.
                 y:ys -> if needResult
                           then (y:restoreInstr) ++ ys
                           else restoreInstr ++ (y:ys)

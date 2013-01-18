@@ -28,25 +28,32 @@ data Graph
   = Graph {
     vertices    :: Set VertexId,
     edges       :: Map VertexId (Set VertexId),
+    moveEdges   :: Map VertexId (Set VertexId),
     vertexToReg :: Map VertexId Reg,
     regToVertex :: Map Reg VertexId
   }
 
-buildGraph :: Fg.FlowGraph (Liveness a) -> UniqueM Graph
+buildGraph :: Instruction a => Fg.FlowGraph (Liveness a) -> UniqueM Graph
 buildGraph g = go
   where
-    livenessInfo = map Set.toList (concatMap (foldMap combine) blockList)
     blockList = Map.elems (Fg.blockMap g)
-    combine lv = [liveIn lv, liveOut lv]
+    flattenedInstrs = concatMap toList blockList
+
     emptyGraph = Graph {
       vertices = Set.empty,
       edges = Map.empty,
+      moveEdges = Map.empty,
       vertexToReg = Map.empty,
       regToVertex = Map.empty
     }
 
     go = flip execStateT emptyGraph $ do
-      mapM_ addInterference livenessInfo
+      forM_ flattenedInstrs $ \i -> do
+        addInterference (toList (liveIn i))
+        addInterference (toList (liveOut i))
+        if isSimpleMoveInstr i
+          then addMove i
+          else return ()
 
     addInterference regs = case regs of
       x:xs -> do
@@ -66,6 +73,7 @@ buildGraph g = go
           modify $ \st -> st {
             vertices = Set.insert v (vertices st),
             edges = Map.insert v Set.empty (edges st),
+            moveEdges = Map.insert v Set.empty (moveEdges st),
             vertexToReg = Map.insert v r (vertexToReg st),
             regToVertex = Map.insert r v (regToVertex st)
           }
@@ -75,8 +83,26 @@ buildGraph g = go
       modify $ \st -> st {
         edges = conn v1 v2 . conn v2 v1 . edges $ st
       }
-      where
-        conn a b = Map.adjust (Set.insert b) a
+
+    addMove i = do
+      let [dest] = toList (defs i)
+          [src] = toList (uses i)
+      if isVirtualReg dest || isVirtualReg src
+        then do
+          vDest <- addVertex dest
+          vSrc <- addVertex src
+          addMoveEdge vDest vSrc
+        else
+          -- We ignore physReg -> physReg moves,
+          -- since we cannot coalesce them.
+          return ()
+
+    addMoveEdge vDest vSrc = do
+      modify $ \st -> st {
+        moveEdges = conn vDest vSrc (moveEdges st)
+      }
+
+    conn dest src = Map.adjust (Set.insert dest) src
 
 -- Helper functions
 
@@ -102,20 +128,29 @@ vertexWithMinimumDegree g = fst . minimumBy sorter $ edgeList
 -- Dot support
 
 graphToDot :: Graph -> (VertexId -> String) -> Dot ()
-graphToDot (Graph vs es rs _) showVertex = (`evalStateT` Set.empty) $ do
+graphToDot (Graph vs es mes rs _) showVertex = (`evalStateT` Set.empty) $ do
   forM_ vs $ \v -> do
     let node = userNodeId v
     lift $ userNode node [("label", showVertex v),
                           ("shape", "circle"),
                           ("fontsize", "8.00")]
+    -- Draw interference edge. Since it's a undirected graph, we need
+    -- to check for duplicate drawings.
     forM_ (es Map.! v) $ \v' -> do
-      let node' = userNodeId v'
-      alreadyConnected <- gets (Set.member (v', v))
-      if not alreadyConnected
+      tryConn v v' [("dir", "none")] True
+
+    -- Draw move edge. Directed and dotted.
+    forM_ (Map.findWithDefault Set.empty v mes) $ \v' -> do
+      tryConn v v' [("style", "dotted")] False
+  where
+    tryConn v1 v2 style checkDup = do
+      alreadyConnected <- gets (Set.member (v2, v1))
+      if not checkDup || not alreadyConnected
         then do
-          lift $ edge node node' [("dir", "none")]  -- undirected graph
-          modify (Set.insert (v, v'))
-        else return ()
+          lift $ edge (userNodeId v1) (userNodeId v2) style
+          modify (Set.insert (v1, v2))
+        else
+          return ()
 
 rawGraphToDot g = graphToDot g showVertex
   where

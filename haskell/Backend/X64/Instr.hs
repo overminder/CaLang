@@ -16,11 +16,13 @@ instance Instruction Instr where
   isFallThroughInstr = x64_isFallThroughInstr
   getFallThroughTarget = x64_getFallThroughTarget
   mkJumpInstr = x64_mkJumpInstr
+  mkNopInstr = NOP
   renameBranchInstrLabel = x64_renameBranchInstrLabel
   getUseOfInstr = x64_getUseOfInstr
   getDefOfInstr = x64_getDefOfInstr
   replaceRegInInstr = x64_replaceRegInInstr
   isPureInstr = x64_isPureInstr
+  isSimpleMoveInstr = x64_isSimpleMoveInstr
 
 instance Ppr Instr where
   ppr = ppr_instr
@@ -31,6 +33,8 @@ data Instr
   = LABEL  Imm
   | PROLOG
   | EPILOG
+  
+  | NOP
   
   | MOV    OpWidth Operand Operand
   | MOVZxQ OpWidth Operand Operand
@@ -279,6 +283,10 @@ x64_isPureInstr i = case i of
   RET      _     -> False
   _              -> False
 
+x64_isSimpleMoveInstr i = case i of
+  MOV    _ o1 o2 -> isReg o1 && isReg o2
+  _              -> False
+
 -- Ppr impl
 
 ppr_instr :: Instr -> Doc
@@ -323,6 +331,7 @@ ppr_instr i = case i of
       RLt -> "l"
 
     disas i = case i of
+      NOP          -> ("nop", [])
       MOV    w o1 o2 -> ("mov" ++ show_width w,  [o1, o2])
       MOVZxQ w o1 o2 -> ("movz" ++ show_width w ++ "q", [o1, o2])
       MOVSxQ w o1 o2 -> ("movs" ++ show_width w ++ "q", [o1, o2])

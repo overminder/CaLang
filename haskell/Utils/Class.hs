@@ -1,5 +1,6 @@
 {-# LANGUAGE RankNTypes #-}
 module Utils.Class (
+  module Text.PrettyPrint,
   Ppr(..),
   pass,
   mapRM,

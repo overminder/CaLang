@@ -1,5 +1,7 @@
 module Backend.X64.Regs (
   generalRegs,
+  returnReg,
+  framePtrReg, stackPtrReg,
 
   rax, rcx, rdx, rbx, rdi, rsi, rsp, rbp, r8,
   r9, r10, r11, r12, r13, r14, r15, rip,
@@ -64,3 +66,6 @@ regNameToReg = Map.fromList ((zip quadRegNames quadRegs) ++
 generalRegs = reverse [rbx, r12, r13, r14, r15,
                rax, rcx, rdx, rdi, rsi, r8, r9, r10, r11]
 
+returnReg = rax
+framePtrReg = rbp
+stackPtrReg = rsp

@@ -1,5 +1,6 @@
 CALCC = ./Compile
 CC = gcc
+CALCCFLAGS = --fuel 0
 
 all :
 	echo "nothing to do..."
@@ -8,10 +9,10 @@ all :
 	$(CC) $< -o $@
 
 %.s : %.cal
-	$(CALCC) $< --O0 --cpp -o $@
+	$(CALCC) $< --O0 --cpp $(CALCCFLAGS) -o $@
 
 %.dot : %.cal
-	$(CALCC) $< --O0-lv --cpp | xdot.py -
+	$(CALCC) $< --O0-lv --cpp $(CALCCFLAGS) | xdot.py -
 
 clean :
 	rm -f *.s *-c

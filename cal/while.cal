@@ -15,8 +15,11 @@ sum(i64 n) {
     return s;
 }
 
-main() {
-    call "C/vararg" printf("sum 10 = %ld\n", call sum(10));
+main(i64 argc, i64 argv) {
+    i64 n;
+    
+    n = call getArg(argc, argv, 10);
+    call "C/vararg" printf("sum %ld = %ld\n", n, call sum(n));
     return 0;
 }
 

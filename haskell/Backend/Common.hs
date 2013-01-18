@@ -14,7 +14,7 @@ module Backend.Common (
   Reg(..), PhysicalReg(..), VirtualReg(..),
   Imm(..),
   Addr(..),
-  Operand(..),
+  Operand(..), isReg, isImm, isAddr,
   CallingConv(..), parseCallingConv, callingConvNames,
   GcMap(..),
 
@@ -55,19 +55,23 @@ class Register r where
 class Instruction instr where
   isBranchInstr :: instr -> Bool
   localBranchTargets :: instr -> [Imm]
+
   isLabelInstr :: instr -> Bool
   getLabelOfInstr :: instr -> Imm
-  isFallThroughInstr :: instr -> Bool
 
+  isFallThroughInstr :: instr -> Bool
   -- Nothing if you need to find it by yourself in the flowgraph
   getFallThroughTarget :: instr -> Maybe Imm
 
   mkJumpInstr :: Imm -> instr
+  mkNopInstr :: instr
+
   renameBranchInstrLabel :: (Imm -> Imm) -> instr -> instr
   getUseOfInstr :: instr -> [Reg]
   getDefOfInstr :: instr -> [Reg]
   replaceRegInInstr :: (Reg -> Reg) -> instr -> instr
   isPureInstr :: instr -> Bool
+  isSimpleMoveInstr :: instr -> Bool
 
 data Reg
   = RegV VirtualReg
@@ -117,6 +121,15 @@ data Operand
   | OpImm Imm
   | OpAddr Addr
   deriving (Show, Eq, Ord)
+
+isReg (OpReg _)   = True
+isReg _           = False
+
+isImm (OpImm _)   = True
+isImm _           = False
+
+isAddr (OpAddr _) = True
+isAddr _          = False
 
 data CallingConv
   = TailCall

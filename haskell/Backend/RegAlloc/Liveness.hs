@@ -42,6 +42,7 @@ instance Instruction a => Instruction (Liveness a) where
   isFallThroughInstr = isFallThroughInstr . instr
   getFallThroughTarget = getFallThroughTarget . instr
   mkJumpInstr _ = undefined
+  mkNopInstr = mkEmptyLiveness mkNopInstr
   renameBranchInstrLabel _ = undefined
   getUseOfInstr _ = undefined
   getDefOfInstr _ = undefined
@@ -49,6 +50,7 @@ instance Instruction a => Instruction (Liveness a) where
     = Liveness (replaceRegInInstr f i) (Set.map f ds) (Set.map f us)
                (Set.map f lin) (Set.map f lout)
   isPureInstr = isPureInstr . instr
+  isSimpleMoveInstr = isSimpleMoveInstr . instr
 
 pprRegSet = braces . hsep . punctuate comma . map pprReg . Set.toList
 

@@ -17,11 +17,13 @@ instance Instruction Instr where
   isFallThroughInstr = ir_isFallThroughInstr
   getFallThroughTarget = ir_getFallThroughTarget
   mkJumpInstr = ir_mkJumpInstr
+  mkNopInstr = undefined
   renameBranchInstrLabel = ir_renameBranchInstrLabel
   getUseOfInstr = ir_getUseOfInstr
   getDefOfInstr = ir_getDefOfInstr
   replaceRegInInstr = ir_replaceRegInInstr
   isPureInstr = ir_isPureInstr
+  isSimpleMoveInstr = ir_isSimpleMoveInstr
 
 instance Ppr Instr where
   ppr = ppr_instr
@@ -159,5 +161,9 @@ ir_isPureInstr i = case i of
   MOV   _ _     -> True
   UNROP _ _ _   -> True
   BINOP _ _ _ _ -> True
+  _             -> False
+
+ir_isSimpleMoveInstr i = case i of
+  MOV   _ op    -> isReg op
   _             -> False
 
