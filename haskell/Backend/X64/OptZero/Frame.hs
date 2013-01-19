@@ -1,8 +1,8 @@
 module Backend.X64.OptZero.Frame (
   Frame(..),
   GcMap(..),
-  FrameM,
-  evalFrameM,
+  FrameT,
+  evalFrameT,
   genPlatDepCode,
 
   mkBaseIndexAddr, mkBaseAddr,
@@ -51,18 +51,24 @@ data Frame
   }
 
 mStackPtr f = \st -> st { stackPtr = f (stackPtr st) }
+modifyStackPtr :: Monad m => (Int -> Int) -> FrameT m ()
 modifyStackPtr = modify . mStackPtr
+
 mGcptrOffsets f = \st -> st { gcptrOffsets = f (gcptrOffsets st) }
+modifyGcptrOffsets :: Monad m => (Set Int -> Set Int) -> FrameT m ()
 modifyGcptrOffsets = modify . mGcptrOffsets
+
 mRegMap f = \st -> st { regMap = f (regMap st) }
+modifyRegMap :: Monad m => (Map RegId Int -> Map RegId Int) -> FrameT m ()
 modifyRegMap = modify . mRegMap
+
 addGcMap m = \st -> st { gcMaps = m:gcMaps st }
 
-type FrameM = StateT Frame UniqueM
+type FrameT = StateT Frame
 
-evalFrameM :: Fg.FlowGraph (Liveness Instr) -> [Reg] -> Set Reg ->
-              FrameM a -> UniqueM a
-evalFrameM g clobs allocRegs = (`evalStateT` emptyFrame)
+evalFrameT :: Monad m => Fg.FlowGraph (Liveness Instr) ->
+              [Reg] -> Set Reg -> FrameT m a -> m a
+evalFrameT g clobs allocRegs = (`evalStateT` emptyFrame)
   where
     emptyFrame = Frame {
       flowGraph = g,
@@ -82,7 +88,7 @@ evalFrameM g clobs allocRegs = (`evalStateT` emptyFrame)
 -- Insert reg save/restore at callsite and prolog/epilog.
 -- Also deal with Gc interface (make gcmap, insert labels, etc).
 -- We currently always generate gcmap (as it is zero cost to the runtime).
-genPlatDepCode :: FrameM (Fg.FlowGraph Instr, [GcMap])
+genPlatDepCode :: Monad m => FrameT m (Fg.FlowGraph Instr, [GcMap])
 genPlatDepCode = do
   mkSpaceForCalleeSaveRegs
   blocks <- liftM2 getBlockTrace (gets (Fg.blockTrace . flowGraph))
@@ -103,8 +109,8 @@ genPlatDepCode = do
 -- and restore instruction after the call.
 --
 -- Also, when GC interface is required, this will make a new gcmap.
-insertCallSiteRegSave :: Fg.BasicBlock (Liveness Instr) ->
-                         FrameM (Fg.BasicBlock (Liveness Instr))
+insertCallSiteRegSave :: Monad m => Fg.BasicBlock (Liveness Instr) ->
+                         FrameT m (Fg.BasicBlock (Liveness Instr))
 insertCallSiteRegSave block = do
   toPrepend <- getAndClearPrependInstr
   attachLabelToPrevGcMap (Fg.blockId block)
@@ -152,7 +158,7 @@ insertCallSiteRegSave block = do
     mkRestoreInstr r loc = mkEmptyLiveness (movq loc (OpReg r))
 
 -- Make a new gcmap with caller-save information for this callsite.
-prepareNewGcMap :: [(Reg, Operand)] -> [Reg] -> FrameM ()
+prepareNewGcMap :: Monad m => [(Reg, Operand)] -> [Reg] -> FrameT m ()
 prepareNewGcMap savedAtCallSite escapes = do
   savedRegs <- gets (map (second unwrapFrameLoc) . calleeSaveInfo)
   let gcOffsets = map (unwrapFrameLoc . snd)
@@ -172,7 +178,7 @@ prepareNewGcMap savedAtCallSite escapes = do
       = fromIntegral offset
     regIsGc = getGcFlag . gcFlagOfReg
 
-attachLabelToPrevGcMap :: Fg.BlockId -> FrameM ()
+attachLabelToPrevGcMap :: Monad m => Fg.BlockId -> FrameT m ()
 attachLabelToPrevGcMap bid = do
   mbGcMap <- gets prevGcMap
   case mbGcMap of
@@ -183,7 +189,7 @@ attachLabelToPrevGcMap bid = do
         prevGcMap = Nothing
       }
 
-filterCallerSaves :: [Reg] -> FrameM [Reg]
+filterCallerSaves :: Monad m => [Reg] -> FrameT m [Reg]
 filterCallerSaves rs = do
   clobs <- gets clobberedRegs
   return $ filter (isCallerSave clobs) rs
@@ -194,7 +200,7 @@ filterCallerSaves rs = do
                                then True
                                else False
 
-filterEscapedRegs :: [Reg] -> FrameM [Reg]
+filterEscapedRegs :: Monad m => [Reg] -> FrameT m [Reg]
 filterEscapedRegs rs = do
   clobs <- gets clobberedRegs
   return $ filter (isEscape clobs) rs
@@ -205,17 +211,19 @@ filterEscapedRegs rs = do
                            then True
                            else False
 
-getAndClearPrependInstr :: FrameM ([Liveness Instr] -> [Liveness Instr])
+getAndClearPrependInstr :: Monad m => FrameT m ([Liveness Instr] ->
+                           [Liveness Instr])
 getAndClearPrependInstr = do
   is <- gets prependInstr
   modify $ \st -> st { prependInstr = id }
   return is
 
-setPrependInstr :: ([Liveness Instr] -> [Liveness Instr]) -> FrameM ()
+setPrependInstr :: Monad m => ([Liveness Instr] -> [Liveness Instr]) ->
+                   FrameT m ()
 setPrependInstr is = modify $ \st -> st { prependInstr = is }
 
-insertPrologAndEpilog :: Fg.BasicBlock (Liveness Instr) ->
-                         FrameM (Fg.BasicBlock (Liveness Instr))
+insertPrologAndEpilog :: Monad m => Fg.BasicBlock (Liveness Instr) ->
+                         FrameT m (Fg.BasicBlock (Liveness Instr))
 insertPrologAndEpilog block = do
   let instrs = Fg.instrList block ++ (toList (Fg.controlInstr block))
   instrs <- liftM concat (mapM replacePrologWithSaves instrs)
@@ -225,12 +233,12 @@ insertPrologAndEpilog block = do
                  , Fg.controlInstr = Just (last instrs)
                  }
 
-findCalleeSaveRegUses :: FrameM [Reg]
+findCalleeSaveRegUses :: Monad m => FrameT m [Reg]
 findCalleeSaveRegUses = do
   allUses <- gets allocatedRegs
   return $ filter (`elem` kCalleeSaves) allUses
 
-mkSpaceForCalleeSaveRegs :: FrameM ()
+mkSpaceForCalleeSaveRegs :: Monad m => FrameT m ()
 mkSpaceForCalleeSaveRegs = do
   regsToSave <- findCalleeSaveRegUses
   regLocPairs <- forM regsToSave $ \r -> do
@@ -242,7 +250,8 @@ mkSpaceForCalleeSaveRegs = do
 -- XXX: remember to add to GcMap
 -- We rely on the invariant that prolog instr can only occur once in
 -- a function.
-replacePrologWithSaves :: Liveness Instr -> FrameM [Liveness Instr]
+replacePrologWithSaves :: Monad m =>
+                          Liveness Instr -> FrameT m [Liveness Instr]
 replacePrologWithSaves i = case instr i of
   PROLOG -> do
     regLocPairs <- gets calleeSaveInfo
@@ -254,7 +263,8 @@ replacePrologWithSaves i = case instr i of
 
 -- We dont see real EPILOG since RET (True,..)/JMP op (Just ...) represent
 -- EPILOG good enough.
-replaceEpilogWithRestores :: Liveness Instr -> FrameM [Liveness Instr]
+replaceEpilogWithRestores :: Monad m =>
+                             Liveness Instr -> FrameT m [Liveness Instr]
 replaceEpilogWithRestores i = case instr i of
   RET _ -> handleEpilog
   JMP _ (Just _) -> handleEpilog
@@ -289,7 +299,7 @@ adjustStackFrame i = case instr i of
 
 -- Allocate (or retrive if allocated previously) a location on the stack
 -- and return its address.
-stackAlloc :: Reg -> FrameM Operand
+stackAlloc :: Monad m => Reg -> FrameT m Operand
 stackAlloc r = case r of
   RegP (PhysicalReg (rid, _, _, gcf)) -> do
     mb <- gets (Map.lookup rid . regMap)
@@ -304,13 +314,13 @@ stackAlloc r = case r of
       else return ()
     return . OpAddr . mkFrameAddr $ (offset - natSize)
 
-stackAllocRaw :: Int -> FrameM Int
+stackAllocRaw :: Monad m => Int -> FrameT m Int
 stackAllocRaw siz = do
   offset <- gets (negate . stackPtr)
   modifyStackPtr (+siz)
   return offset
 
-markGcPtr :: Int -> FrameM ()
+markGcPtr :: Monad m => Int -> FrameT m ()
 markGcPtr offset = do
   modifyGcptrOffsets (Set.insert offset)
 

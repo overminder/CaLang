@@ -24,15 +24,16 @@ import Utils.Class
 
 import Debug.Trace
 
-type FuelM = StateT Int UniqueM
+type FuelT = StateT Int
 
 -- (Dest, Src)
 type MovePair = (Reg, Reg)
 
 pprMovePair (r1, r2) = parens (pprReg r1 <> comma <+> pprReg r2)
 
-coalesce :: Instruction a => Fg.FlowGraph (Liveness a) -> Graph ->
-            FuelM (Fg.FlowGraph (Liveness a), Graph)
+coalesce :: (MonadUnique m, Instruction a) =>
+            Fg.FlowGraph (Liveness a) -> IGraph ->
+            FuelT m (Fg.FlowGraph (Liveness a), IGraph)
 coalesce fGraph iGraph = do
   remainingFuel <- get
   if remainingFuel == 0
@@ -74,12 +75,12 @@ coalesce fGraph iGraph = do
                         else return ([replaceRegInInstr replaceReg i], True)
               False -> return ([replaceRegInInstr replaceReg i], True)
             fg'' = iterDCE . iterLiveness . fmap instr $ fg'
-        ig' <- lift $ buildGraph fg''
+        ig' <- lift $ buildIGraph fg''
         modify (flip (-) 1)
         coalesce fg'' ig'
         --return (fg'', ig')
 
-findCoalescable :: Graph -> Maybe MovePair
+findCoalescable :: IGraph -> Maybe MovePair
 findCoalescable g = case coalescables of
   x:xs -> 
     Just x

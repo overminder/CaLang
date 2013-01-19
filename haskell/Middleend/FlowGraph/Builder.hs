@@ -1,6 +1,6 @@
 {-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 module Middleend.FlowGraph.Builder (
-  runGraphBuilderM,
+  runGraphBuilderT,
   buildGraph,
   graphToDot,
   FlowGraph(..),
@@ -62,12 +62,12 @@ data GraphBuilder a
   }
   deriving (Functor)
 
-type CompilerM = UniqueM
-type GraphBuilderM instr = StateT (GraphBuilder instr) CompilerM
+type GraphBuilderT instr = StateT (GraphBuilder instr)
 
-runGraphBuilderM :: Instruction instr => String -> [Reg] -> Bool ->
-                    GraphBuilderM instr a -> CompilerM (FlowGraph instr)
-runGraphBuilderM name args conv m = do
+runGraphBuilderT :: (MonadUnique m, Instruction instr) =>
+                    String -> [Reg] -> Bool ->
+                    GraphBuilderT instr m a -> m (FlowGraph instr)
+runGraphBuilderT name args conv m = do
   bdr <- execStateT m empty_builder
   let g = (gbGraph bdr) { labelMap = gbLabelMap bdr }
   return g
@@ -87,7 +87,8 @@ runGraphBuilderM name args conv m = do
 
 empty_block = MkBlock (-1) [] Nothing []
 
-buildGraph :: Instruction a => [a] -> GraphBuilderM a ()
+buildGraph :: (MonadState s m, MonadUnique m, Instruction a) =>
+              [a] -> GraphBuilderT a m ()
 buildGraph is = do
   entry <- newBlock
   modify $ \st -> st {
@@ -96,7 +97,8 @@ buildGraph is = do
   mapM_ addInstr is
   resolveLazyLinks
 
-addInstr :: Instruction a => a -> GraphBuilderM a ()
+addInstr :: (MonadState s m, MonadUnique m, Instruction a) =>
+            a -> GraphBuilderT a m ()
 addInstr i
   | isBranchInstr i = do
       currBlock <- liftM gbCurrBlock get
@@ -140,7 +142,7 @@ addInstr i
       }
     }
 
-resolveLazyLinks :: GraphBuilderM a ()
+resolveLazyLinks :: MonadState s m => GraphBuilderT a m ()
 resolveLazyLinks = do
   links <- liftM gbLazyLinks get
   lblMap <- liftM gbLabelMap get
@@ -149,7 +151,7 @@ resolveLazyLinks = do
       Just toId -> linkBlock fromId toId
       Nothing -> error $ "X64.resolveLazyLinks: unknown label: " ++ show lbl
 
-finishCurrBlock :: GraphBuilderM a ()
+finishCurrBlock :: MonadState s m => GraphBuilderT a m ()
 finishCurrBlock = do
   currBlock <- liftM gbCurrBlock get
   insertBlock currBlock
@@ -157,7 +159,7 @@ finishCurrBlock = do
     gbCurrBlock = empty_block
   }
 
-insertBlock :: BasicBlock a -> GraphBuilderM a ()
+insertBlock :: MonadState s m => BasicBlock a -> GraphBuilderT a m ()
 insertBlock bb = do
   blkMap <- liftM (blockMap . gbGraph) get
   modify $ \st -> st {
@@ -166,7 +168,7 @@ insertBlock bb = do
     }
   }
 
-newBlock :: GraphBuilderM a BlockId
+newBlock :: (MonadState s m, MonadUnique m) => GraphBuilderT a m BlockId
 newBlock = do
   i <- mkUnique
   modify $ \st -> st {
@@ -174,12 +176,12 @@ newBlock = do
   }
   return i
 
-addLazyLink :: BlockId -> Imm -> GraphBuilderM a ()
+addLazyLink :: MonadState s m => BlockId -> Imm -> GraphBuilderT a m ()
 addLazyLink bid lbl = modify $ \st -> st {
   gbLazyLinks = (bid, lbl):gbLazyLinks st
 }
 
-linkBlock :: BlockId -> BlockId -> GraphBuilderM a ()
+linkBlock :: MonadState s m => BlockId -> BlockId -> GraphBuilderT a m ()
 linkBlock bFrom bTo = do
   g <- liftM gbGraph get
   modify $ \st -> st {
@@ -191,7 +193,7 @@ linkBlock bFrom bTo = do
   where
     insert_set = Map.insertWithKey (const Set.union)
 
-addLabelMapping :: Imm -> BlockId -> GraphBuilderM a ()
+addLabelMapping :: MonadState s m => Imm -> BlockId -> GraphBuilderT a m ()
 addLabelMapping i b = do
   modify $ \st -> st {
     gbLabelMap = Map.insert i b (gbLabelMap st)

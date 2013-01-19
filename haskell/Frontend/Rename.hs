@@ -1,5 +1,4 @@
 module Frontend.Rename (
-  runRenameM,
   rename,
 ) where
 
@@ -32,10 +31,10 @@ data RenameState
   }
 
 type CompilerM = UniqueM -- for now
-type RenameM = StateT RenameState CompilerM
+type RenameT = StateT RenameState
 
-runRenameM :: RenameM a -> CompilerM a
-runRenameM m = evalStateT m empty_state
+evalRenameT :: MonadUnique m => RenameT m a -> m a
+evalRenameT m = evalStateT m empty_state
   where
     empty_state = MkState {
       rnGlobals = Map.empty,
@@ -44,9 +43,9 @@ runRenameM m = evalStateT m empty_state
       rnCFuncs = Set.empty
     }
 
-rename :: Program Name -> RenameM ([Data Operand], [Func Operand],
-                                   [String], [Reg])
-rename xs = do
+rename :: MonadUnique m => Program Name ->
+          m ([Data Operand], [Func Operand], [String], [Reg])
+rename xs = evalRenameT $ do
   -- Two passes
   mapM_ scanToplevel xs
   tops <- liftM join (mapM renameToplevel xs)
@@ -66,23 +65,23 @@ rename xs = do
 
 -- Worker functions
 
-newGlobal :: StorageType -> String -> RenameM ()
+newGlobal :: MonadUnique m => StorageType -> String -> RenameT m ()
 newGlobal ty name = modify $ \st -> st {
   rnGlobals = Map.insert name (OpImm (NamedLabel name)) (rnGlobals st) 
 }
 
-newExport :: String -> RenameM ()
+newExport :: MonadUnique m => String -> RenameT m ()
 newExport name = modify $ \st -> st {
   rnExports = name:rnExports st
 }
 
-newExportC :: String -> RenameM ()
+newExportC :: MonadUnique m => String -> RenameT m ()
 newExportC name = modify $ \st -> st {
   rnExports = name:rnExports st,
   rnCFuncs = Set.insert name (rnCFuncs st)
 }
 
-newGlobalReg :: String -> Operand -> RenameM ()
+newGlobalReg :: MonadUnique m => String -> Operand -> RenameT m ()
 newGlobalReg name reg = modify $ \st -> st {
   rnGlobals = Map.insert name reg (rnGlobals st),
   rnClobberedRegs = reg:rnClobberedRegs st
@@ -92,7 +91,7 @@ resolveGlobal :: String -> RenameState -> Maybe Operand
 resolveGlobal name st = Map.lookup name (rnGlobals st)
 
 -- First pass on toplevel: scan global defs
-scanToplevel :: ToplevelDef Name -> RenameM ()
+scanToplevel :: MonadUnique m => ToplevelDef Name -> RenameT m ()
 scanToplevel t = case t of
   FuncDef (Func name _ _ _) -> newGlobal u32 name
   DataDef (LiteralData (ty, name) _) -> newGlobal ty name
@@ -104,7 +103,8 @@ scanToplevel t = case t of
     Import names -> mapM_ (newGlobal i64) names
     GlobalReg name reg -> newGlobalReg name (OpReg reg)
 
-renameToplevel :: ToplevelDef Name -> RenameM [ToplevelDef Operand]
+renameToplevel :: MonadUnique m => ToplevelDef Name ->
+                  RenameT m [ToplevelDef Operand]
 renameToplevel t = case t of
   FuncDef f@(Func _ _ _ _) ->
     liftM (pure . FuncDef) (renameFunc f)
@@ -121,11 +121,11 @@ renameToplevel t = case t of
     -- Imports are just used for type checking
     return []
 
-renameFunc :: Func Name -> RenameM (Func Operand)
+renameFunc :: MonadUnique m => Func Name -> RenameT m (Func Operand)
 renameFunc (Func name args body _) = do
   isC <- gets (Set.member name . rnCFuncs)
   (Just name') <- gets (resolveGlobal name)
-  runFuncM $ do
+  evalFuncT $ do
     -- 1st pass
     args' <- forM args $ \(ty, name) -> do
       op <- newRegV ty
@@ -137,10 +137,10 @@ renameFunc (Func name args body _) = do
     let body' = fmap nameResolver body
     return $ Func name' args' body' isC
 
-type FuncM = StateT LocalRenameState RenameM
+type FuncT m = StateT LocalRenameState (RenameT m)
 
-runFuncM :: FuncM a -> RenameM a
-runFuncM = flip evalStateT empty_state
+evalFuncT :: MonadUnique m => FuncT m a -> RenameT m a
+evalFuncT = flip evalStateT empty_state
   where
     empty_state = MkLocalState Map.empty
 
@@ -149,7 +149,7 @@ data LocalRenameState
     localNames :: Map String Operand
   }
 
-addLocal :: Name -> Operand -> FuncM ()
+addLocal :: MonadUnique m => Name -> Operand -> FuncT m ()
 addLocal name op = modify $ \st -> st {
     localNames = let dct = localNames st
                      dup = Map.member name dct
@@ -159,7 +159,7 @@ addLocal name op = modify $ \st -> st {
                        else Map.insert name op dct
   }
 
-mkNameResolver :: FuncM (Name -> Operand)
+mkNameResolver :: MonadUnique m => FuncT m (Name -> Operand)
 mkNameResolver = do
   localDct <- gets localNames
   globalDct <- lift $ gets rnGlobals
@@ -180,7 +180,7 @@ mkNameResolver = do
   return f
 
 -- First pass on function: scan local label defs and var defs.
-scanStmt :: Stmt Name -> FuncM ()
+scanStmt :: MonadUnique m => Stmt Name -> FuncT m ()
 scanStmt s = case s of
   SVarDecl bs -> forM_ bs $ \(ty, name) -> do
     op <- newRegV ty

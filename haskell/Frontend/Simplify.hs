@@ -1,5 +1,4 @@
 module Frontend.Simplify (
-  runSimplifyM,
   simplify,
 ) where
 -- This is a pass after renaming. It does the following things:
@@ -22,8 +21,7 @@ import Utils.Unique
 import Frontend.AST
 import Backend.Operand
 
-type CompilerM = UniqueM
-type SimplifyM = StateT SimState CompilerM
+type SimplifyT m = StateT SimState m
 
 data SimState
   = MkState {
@@ -31,16 +29,17 @@ data SimState
     jumpTable :: [Data Operand]
   }
 
-runSimplifyM m = evalStateT m empty_state
+evalSimplifyT :: MonadUnique m => SimplifyT m a -> m a
+evalSimplifyT m = evalStateT m empty_state
   where
     empty_state = MkState {
       extractedString = Map.empty,
       jumpTable = []
     }
 
-simplify :: [Data Operand] -> [Func Operand] ->
-            SimplifyM ([Data Operand], [Func Operand])
-simplify datas funcs = do
+simplify :: MonadUnique m => [Data Operand] -> [Func Operand] ->
+            m ([Data Operand], [Func Operand])
+simplify datas funcs = evalSimplifyT $ do
   funcs' <- mapM simplifyFunc funcs
   datas' <- mapM simplifyData datas
   more_str <- liftM (mk_datas . extractedString) get
@@ -57,7 +56,7 @@ runPipeline ms init = case ms of
   [] -> return init
 
 -- All of the simplifications
-simplifyFunc :: Func Operand -> SimplifyM (Func Operand)
+simplifyFunc :: MonadUnique m => Func Operand -> SimplifyT m (Func Operand)
 simplifyFunc (Func name args body isC) = do
   body' <- runPipeline [extractStr,
                         extractJumpTable,
@@ -68,7 +67,7 @@ simplifyFunc (Func name args body isC) = do
                        body
   return $ Func name args body' isC
 
-simplifyData :: Data Operand -> SimplifyM (Data Operand)
+simplifyData :: MonadUnique m => Data Operand -> SimplifyT m (Data Operand)
 simplifyData (LiteralData (ty, name) lit) = do
   lit' <- case lit of
     LArr xs -> liftM LArr (mapM extract_str xs)
@@ -79,7 +78,7 @@ simplifyData (LiteralData (ty, name) lit) = do
       LStr s -> liftM LSym (internString s)
       _ -> return lit
 
-extractStr :: Stmt Operand -> SimplifyM (Stmt Operand)
+extractStr :: MonadUnique m => Stmt Operand -> SimplifyT m (Stmt Operand)
 extractStr = traverseExprM extract_str'
   where
     extract_str' e = case e of
@@ -98,7 +97,7 @@ extractStr = traverseExprM extract_str'
         return $ ECall conv func' args'
       _ -> return e
 
-internString :: String -> SimplifyM Operand
+internString :: MonadUnique m => String -> SimplifyT m Operand
 internString s = do
   strs <- liftM extractedString get
   case Map.lookup s strs of
@@ -111,7 +110,7 @@ internString s = do
       return new_label
     Just old_label -> return old_label
 
-extractJumpTable :: Stmt Operand -> SimplifyM (Stmt Operand)
+extractJumpTable :: MonadUnique m => Stmt Operand -> SimplifyT m (Stmt Operand)
 extractJumpTable s = case s of
   SSwitch e labels Nothing -> do
     table_name <- mk_jump_table labels
@@ -137,7 +136,7 @@ extractJumpTable s = case s of
       add_jump_table table
       return name
 
-liftNestedCall :: Stmt Operand -> SimplifyM (Stmt Operand)
+liftNestedCall :: MonadUnique m => Stmt Operand -> SimplifyT m (Stmt Operand)
 liftNestedCall s = liftExprM lift_expr s
   where
     -- If the parent is not a call

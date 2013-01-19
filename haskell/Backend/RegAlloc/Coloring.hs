@@ -17,19 +17,19 @@ import Backend.Operand
 type GraphStack = [VertexId]
 
 -- We assume no spill/reload is need ATM.
-allocPhysReg :: [Reg] -> Graph -> Map VertexId Reg
+allocPhysReg :: [Reg] -> IGraph -> Map VertexId Reg
 allocPhysReg physRegs g = rebuild simplified g Map.empty
   where
     simplified = simplify g []
 
-    simplify :: Graph -> GraphStack -> GraphStack
+    simplify :: IGraph -> GraphStack -> GraphStack
     simplify g stack = case Set.null (vertices g) of
       True -> stack
       False -> let minV = vertexWithMinimumDegree g
                    g' = removeVertex minV g
                 in simplify g' (minV : stack)
 
-    rebuild :: GraphStack -> Graph -> Map VertexId Reg -> Map VertexId Reg
+    rebuild :: GraphStack -> IGraph -> Map VertexId Reg -> Map VertexId Reg
     rebuild stack g assign = case stack of
       v:vs ->
         let origReg = (vertexToReg g) Map.! v
@@ -55,7 +55,7 @@ allocPhysReg physRegs g = rebuild simplified g Map.empty
             x:_ -> x
             [] -> error $ "findUsableReg: out of regs!"
 
-assignPhysReg :: Instruction a => Map VertexId Reg -> Graph ->
+assignPhysReg :: Instruction a => Map VertexId Reg -> IGraph ->
                Fg.FlowGraph a -> Fg.FlowGraph a
 assignPhysReg assign interfGraph flowGraph
   = fmap (replaceRegInInstr replacer) flowGraph

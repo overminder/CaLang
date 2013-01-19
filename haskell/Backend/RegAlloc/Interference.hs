@@ -1,11 +1,11 @@
 module Backend.RegAlloc.Interference (
-  Graph(..), VertexId,
-  buildGraph,
+  IGraph(..), VertexId,
+  buildIGraph,
   vertexWithMinimumDegree,
   removeVertex,
 
-  graphToDot,
-  rawGraphToDot,
+  iGraphToDot,
+  rawIGraphToDot,
 ) where
 
 import Prelude hiding (concatMap, mapM_)
@@ -24,8 +24,8 @@ import Utils.Unique
 
 type VertexId = Unique
 
-data Graph
-  = Graph {
+data IGraph
+  = IGraph {
     vertices    :: Set VertexId,
     edges       :: Map VertexId (Set VertexId),
     moveEdges   :: Map VertexId (Set VertexId),
@@ -33,13 +33,14 @@ data Graph
     regToVertex :: Map Reg VertexId
   }
 
-buildGraph :: Instruction a => Fg.FlowGraph (Liveness a) -> UniqueM Graph
-buildGraph g = go
+buildIGraph :: (MonadUnique m, Instruction a) =>
+               Fg.FlowGraph (Liveness a) -> m IGraph
+buildIGraph g = go
   where
     blockList = Map.elems (Fg.blockMap g)
     flattenedInstrs = concatMap toList blockList
 
-    emptyGraph = Graph {
+    emptyIGraph = IGraph {
       vertices = Set.empty,
       edges = Map.empty,
       moveEdges = Map.empty,
@@ -47,7 +48,7 @@ buildGraph g = go
       regToVertex = Map.empty
     }
 
-    go = flip execStateT emptyGraph $ do
+    go = flip execStateT emptyIGraph $ do
       forM_ flattenedInstrs $ \i -> do
         addInterference (toList (liveIn i))
         addInterference (toList (liveOut i))
@@ -106,7 +107,7 @@ buildGraph g = go
 
 -- Helper functions
 
-removeVertex :: VertexId -> Graph -> Graph
+removeVertex :: VertexId -> IGraph -> IGraph
 removeVertex v g = g {
   vertices = Set.delete v (vertices g),
   edges = removeThis . removeOthers $ (edges g)
@@ -119,7 +120,7 @@ removeVertex v g = g {
                           combine v' mp = Map.adjust (Set.delete v) v' mp
                        in Set.foldr combine mp others
 
-vertexWithMinimumDegree :: Graph -> VertexId
+vertexWithMinimumDegree :: IGraph -> VertexId
 vertexWithMinimumDegree g = fst . minimumBy sorter $ edgeList
   where
     edgeList = Map.toList (edges g)
@@ -127,8 +128,8 @@ vertexWithMinimumDegree g = fst . minimumBy sorter $ edgeList
 
 -- Dot support
 
-graphToDot :: Graph -> (VertexId -> String) -> Dot ()
-graphToDot (Graph vs es mes rs _) showVertex = (`evalStateT` Set.empty) $ do
+iGraphToDot :: IGraph -> (VertexId -> String) -> Dot ()
+iGraphToDot (IGraph vs es mes rs _) showVertex = (`evalStateT` Set.empty) $ do
   forM_ vs $ \v -> do
     let node = userNodeId v
     lift $ userNode node [("label", showVertex v),
@@ -152,7 +153,7 @@ graphToDot (Graph vs es mes rs _) showVertex = (`evalStateT` Set.empty) $ do
         else
           return ()
 
-rawGraphToDot g = graphToDot g showVertex
+rawIGraphToDot g = iGraphToDot g showVertex
   where
     showVertex v = show $ pprReg ((vertexToReg g) Map.! v)
 

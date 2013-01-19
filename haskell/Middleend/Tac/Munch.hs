@@ -1,6 +1,5 @@
 module Middleend.Tac.Munch (
   munch,
-  runMunchM,
 ) where
 
 -- Direct translation from AST to Tac instruction
@@ -14,21 +13,22 @@ import Middleend.Tac.Instr
 import Backend.Operand
 import Utils.Unique
 
-type CompilerM = UniqueM
-type MunchM = RWST WhileStack [Instr] () CompilerM
+type MunchT m a = RWST WhileStack [Instr] () m a
 
 type WhileStack = [(Imm, Imm)] -- (goto loop, goto end)
 
-runMunchM :: MunchM a -> CompilerM [Instr]
-runMunchM m = liftM snd (execRWST m [] ())
+evalMunchM :: MonadUnique m => MunchT m a -> m [Instr]
+evalMunchM m = liftM snd (execRWST m [] ())
 
-munch :: Stmt Operand -> MunchM ()
-munch body = do
+munch :: MonadUnique m => Stmt Operand -> m [Instr]
+munch body = evalMunchM $ do
   emit PROLOG
   munchStmt body
 
+emit :: MonadUnique m => Instr -> MunchT m ()
 emit = tell . (:[])
 
+munchStmt :: MonadUnique m => Stmt Operand -> MunchT m ()
 munchStmt s = case s of
   SAssign e1 e2 -> case e1 of
     EVar (OpReg r1) -> do
@@ -139,8 +139,8 @@ munchStmt s = case s of
         [] -> error "Tac.munch: continue/break outside while stack"
         x:_ -> return x
 
-munchRel :: MachOp -> Expr Operand -> Expr Operand -> 
-            Stmt Operand -> Stmt Operand -> MunchM ()
+munchRel :: MonadUnique m => MachOp -> Expr Operand -> Expr Operand -> 
+            Stmt Operand -> Stmt Operand -> MunchT m ()
 munchRel op e1 e2 s_true s_false = do
   lbl_true <- newTempLabel "ifTrue"
   lbl_false <- newTempLabel "ifFalse"
@@ -155,10 +155,7 @@ munchRel op e1 e2 s_true s_false = do
   munchStmt s_false
   emit (LABEL lbl_end)
 
-unReg (OpReg r) = r
-unImm (OpImm i) = i
-
-munchExpr :: Expr Operand -> MunchM Operand
+munchExpr :: MonadUnique m => Expr Operand -> MunchT m Operand
 munchExpr e = case e of
   EVar op -> case op of
     OpReg r -> return op

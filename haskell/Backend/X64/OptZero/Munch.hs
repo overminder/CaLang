@@ -38,24 +38,25 @@ modifyInstrForNextBlock f = modify $ \st -> st {
   instrForNextBlock = f (instrForNextBlock st)
 }
 
-munchGraph :: Fg.FlowGraph Tac.Instr -> MunchM (Fg.FlowGraph Instr)
-munchGraph g@(Fg.MkGraph name args isC entry _ blocks pm sm lm) = do
-  -- Here we build a trace of the flow since Call may need to
-  -- emit mov %rax, %dest to the next block.
-  modify $ \st -> st { flowGraph = g }
-  let blockIdTrace = Fg.mkTrace g
-      blockTrace = map (blocks Map.!) blockIdTrace
-  munchedBlocks <- forM blockTrace $ \block -> do
-    instrs <- liftM2 (++) getAndClearPrevInstr
-                          (execWriterT (munchBlock block))
-    return $ Fg.MkBlock {
-      Fg.blockId = Fg.blockId block,
-      Fg.instrList = init instrs,
-      Fg.controlInstr = Just (last instrs),
-      Fg.blockLabels = Fg.blockLabels block
-    }
-  let newBlockMap = Map.fromList (map mkBlockPair munchedBlocks)
-  return $ Fg.MkGraph name args isC entry blockIdTrace newBlockMap pm sm lm
+munchGraph :: Fg.FlowGraph Tac.Instr -> Fg.FlowGraph Instr
+munchGraph g@(Fg.MkGraph name args isC entry _ blocks pm sm lm)
+  = evalMunchM $ do
+    -- Here we build a trace of the flow since Call may need to
+    -- emit mov %rax, %dest to the next block.
+    modify $ \st -> st { flowGraph = g }
+    let blockIdTrace = Fg.mkTrace g
+        blockTrace = map (blocks Map.!) blockIdTrace
+    munchedBlocks <- forM blockTrace $ \block -> do
+      instrs <- liftM2 (++) getAndClearPrevInstr
+                            (execWriterT (munchBlock block))
+      return $ Fg.MkBlock {
+        Fg.blockId = Fg.blockId block,
+        Fg.instrList = init instrs,
+        Fg.controlInstr = Just (last instrs),
+        Fg.blockLabels = Fg.blockLabels block
+      }
+    let newBlockMap = Map.fromList (map mkBlockPair munchedBlocks)
+    return $ Fg.MkGraph name args isC entry blockIdTrace newBlockMap pm sm lm
   where
     mkBlockPair b = (Fg.blockId b, b)
     getAndClearPrevInstr = do

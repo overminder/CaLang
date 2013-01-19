@@ -14,7 +14,7 @@ module Backend.Common (
   Reg(..), PhysicalReg(..), VirtualReg(..),
   Imm(..),
   Addr(..),
-  Operand(..), isReg, isImm, isAddr,
+  Operand(..), isReg, isImm, isAddr, unReg, unImm, unAddr,
   CallingConv(..), parseCallingConv, callingConvNames,
   GcMap(..),
 
@@ -125,11 +125,15 @@ data Operand
 isReg (OpReg _)   = True
 isReg _           = False
 
+unReg (OpReg r) = r
+
 isImm (OpImm _)   = True
 isImm _           = False
+unImm (OpImm i) = i
 
 isAddr (OpAddr _) = True
 isAddr _          = False
+unAddr (OpAddr a) = a
 
 data CallingConv
   = TailCall
