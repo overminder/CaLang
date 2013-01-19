@@ -1,6 +1,6 @@
 CALCC = ./Compile
 CC = gcc
-CALCCFLAGS = --fuel 0
+CALCCFLAGS = --fuel 1000
 
 all :
 	echo "nothing to do..."

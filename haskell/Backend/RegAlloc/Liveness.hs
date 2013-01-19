@@ -107,6 +107,6 @@ eliminateIfDead i = case Set.toList (defs i) of
   [] -> return ([i], False)
   [d] -> do
     if Set.notMember d (liveOut i) && isPureInstr (instr i)
-      then return ([], True)
+      then return ([mkNopInstr], True)
       else return ([i], False)
 
