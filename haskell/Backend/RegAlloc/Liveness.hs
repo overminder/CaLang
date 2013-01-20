@@ -104,7 +104,9 @@ iterDCE g =
 eliminateIfDead :: (Monad m, Instruction a) =>
                    Liveness a -> m ([Liveness a], Bool)
 eliminateIfDead i = case Set.toList (defs i) of
-  [] -> return ([i], False)
+  [] -> if isSimpleMoveInstr i
+          then return ([mkNopInstr], True)
+          else return ([i], False)
   [d] -> do
     if Set.notMember d (liveOut i) && isPureInstr (instr i)
       then return ([mkNopInstr], True)

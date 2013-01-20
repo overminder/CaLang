@@ -1,8 +1,14 @@
 export "C" main;
 
+import foobar;
+
 main(i32 argc, i64 argv) {
     i64 foo;
     foo = argc + argv;
-    return 0;
+    foo = call foobar();
+    i64 bar;
+
+    bar = bar;
+    return bar;
 }
 

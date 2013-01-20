@@ -33,9 +33,10 @@ import qualified Backend.HOST_ARCH.Instr as Arch
 import qualified Backend.HOST_ARCH.OptZero.Munch as Arch
 import qualified Backend.HOST_ARCH.OptZero.Frame as Arch
 import qualified Backend.RegAlloc.Liveness as Ral
-import qualified Backend.RegAlloc.Interference as Ral
+--import qualified Backend.RegAlloc.Interference as Ral
 import qualified Backend.RegAlloc.IGraph as Ral
-import qualified Backend.RegAlloc.Coalescing as Ral
+--import qualified Backend.RegAlloc.Coalescing as Ral
+import qualified Backend.RegAlloc.IterCoalesce as Ral
 import qualified Backend.RegAlloc.Coloring as Ral
 
 import Utils.Unique
@@ -84,7 +85,7 @@ data TaskResult
   , tr_ralInterfGraphs     :: [Ral.IGraph]
   , tr_ralCoalLvGraphs     :: [Fg.FlowGraph (Ral.Liveness Arch.Instr)]
   , tr_ralCoalInterfGraphs :: [Ral.IGraph]
-  , tr_ralMap              :: [Map Ral.VertexId Reg]
+  , tr_ralMaps             :: [Map Ral.Vertex Reg]
   , tr_ralGraphs           :: [Fg.FlowGraph (Ral.Liveness Arch.Instr)]
   , tr_platGraphs          :: [Fg.FlowGraph Arch.Instr]
   , tr_gcMaps              :: [[GcMap]]
@@ -104,11 +105,11 @@ emptyTaskResult = TaskResult
   , tr_tacRnDatas          = error "task dep tac not resolved yet"
   , tr_natGraphs           = error "task dep nat not resolved yet"
   , tr_natLvGraphs         = error "task dep nat not resolved yet"
-  , tr_ralInterfGraphs     = error "task dep ral not resolved yet"
-  , tr_ralCoalLvGraphs     = error "task dep ral not resolved yet"
-  , tr_ralCoalInterfGraphs = error "task dep ral not resolved yet"
-  , tr_ralMap              = error "task dep ral not resolved yet"
-  , tr_ralGraphs           = error "task dep ral not resolved yet"
+  , tr_ralInterfGraphs     = error "task dep ralIG not resolved yet"
+  , tr_ralCoalLvGraphs     = error "task dep ralCoalLv not resolved yet"
+  , tr_ralCoalInterfGraphs = error "task dep ralCoalIG not resolved yet"
+  , tr_ralMaps             = error "task dep ralMap not resolved yet"
+  , tr_ralGraphs           = error "task dep ralG not resolved yet"
   , tr_platGraphs          = error "task dep plat not resolved yet"
   , tr_gcMaps              = error "task dep gc not resolved yet"
   , tr_gcMapDatas          = error "task dep gc not resolved yet"
@@ -227,7 +228,7 @@ printRalCoalInterf = printInterfGraphs . tr_ralCoalInterfGraphs
 
 printRalAssign result = do
   let dots = map mkDot (zip (tr_ralCoalInterfGraphs result)
-                            (tr_ralMap result))
+                            (tr_ralMaps result))
       mkDot (iGraph, color) = 
         let showVertex v = show $ pprReg (color Map.! v)
          in Ral.iGraphToDot iGraph showVertex
@@ -292,7 +293,7 @@ ioPipelines = [do h <- asks opt_input
                             cppd' <- liftIO $ cppIfdef inputPath [] ["."]
                                               cppOption src
                             src' <- liftIO $ macroPass [] cppOption cppd'
-                            modify $ \st -> st { tr_input = src }
+                            modify $ \st -> st { tr_input = src' }
                     else return ()
               ]
 
@@ -350,7 +351,9 @@ pipelines = [ do src <- gets tr_input
                  interfGs <- mapM Ral.buildIGraph lvGraphs
 
                  -- RegAlloc: recklessly coalesce reg-reg moves
+                 -- XXX Disable for now
                  (coalLvGs, coalInterfGs) <- flip evalStateT fuel $ do
+                   return (lvGraphs, interfGs)
                    coalGraphPairs <- zipWithM Ral.coalesce lvGraphs interfGs
                    return (unzip coalGraphPairs)
 
@@ -380,6 +383,7 @@ pipelines = [ do src <- gets tr_input
                    tr_ralInterfGraphs = interfGs,
                    tr_ralCoalLvGraphs = coalLvGs,
                    tr_ralCoalInterfGraphs = coalInterfGs,
+                   tr_ralMaps = ralMaps,
                    tr_platGraphs = platGs,
                    tr_gcMaps = gcMaps,
                    tr_gcMapDatas = gcMapDatas

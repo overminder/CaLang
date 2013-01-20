@@ -129,7 +129,10 @@ x64_renameBranchInstrLabel f instr = case instr of
   _ -> instr
 
 x64_getUseOfInstr instr = case instr of
-  MOV    _ o1 o2 -> mkUseOfSrc o1 ++ mkUseOfDest o2
+  MOV    _ o1 o2 -> if o1 == o2
+                      then [] -- XXX: we need to distinguish between
+                              -- reg with different size here.
+                      else mkUseOfSrc o1 ++ mkUseOfDest o2
   MOVZxQ _ o1 o2 -> mkUseOfSrc o1 ++ mkUseOfDest o2
   MOVSxQ _ o1 o2 -> mkUseOfSrc o1 ++ mkUseOfDest o2
 
@@ -166,7 +169,10 @@ x64_getUseOfInstr instr = case instr of
   _              -> []
 
 x64_getDefOfInstr instr = case instr of
-  MOV    _ o1 o2 -> mkDefOfSrc o1 ++ mkDefOfDest o2
+  MOV    _ o1 o2 -> if o1 == o2
+                      then [] -- XXX: we need to distinguish between
+                              -- reg with different size here.
+                      else mkDefOfSrc o1 ++ mkDefOfDest o2
   MOVZxQ _ o1 o2 -> mkDefOfSrc o1 ++ mkDefOfDest o2
   MOVSxQ _ o1 o2 -> mkDefOfSrc o1 ++ mkDefOfDest o2
 

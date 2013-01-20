@@ -15,7 +15,7 @@ import qualified Data.Set as Set
 
 import qualified Middleend.FlowGraph.Builder as Fg
 import qualified Middleend.FlowGraph.Analysis as Fg
-import Backend.RegAlloc.Interference
+import Backend.RegAlloc.IGraph
 import Backend.RegAlloc.Liveness
 import Backend.Operand
 
