@@ -66,7 +66,14 @@ applyKill fGraph iGraph killWiths = case killWiths of
     repMap = foldr mkRepMap Map.empty killWiths
     mkRepMap (kill, with) mp = Map.map (\r -> if r == kill then with else r)
                                        (Map.insert kill with mp)
-    replace = replaceRegInInstr (\r -> Map.findWithDefault r r repMap)
+    replace = replaceRegInInstr (\r -> case Map.lookup r repMap of
+                                         Nothing -> r
+                                         Just r' ->
+                                           if isPhysicalReg r'
+                                             then copyAll r r'
+                                             else copyOpWidth r r')
+
+    copyAll r = copyOpWidth r . copyGcFlag r
 
 coalesceRegPair :: IGraph -> RegPair -> IGraph
 coalesceRegPair g (kill, with) = g { liveGraph = lg'
@@ -108,6 +115,7 @@ findCoalescable g = case coalescables of
     coalescables = filters [ not . isForbidden
                            , not . doesInterf
                            , not . allPhys
+                           , gcFlagMatches
                            ] moves
 
     v2r = vertex2Reg g
@@ -123,6 +131,11 @@ findCoalescable g = case coalescables of
       | isPhysicalReg dest = dest `elem` forbiddenRegs
       | isPhysicalReg src = src `elem` forbiddenRegs
       | otherwise = False
+
+    gcFlagMatches (dest, src)
+      | isPhysicalReg dest = True
+      | isPhysicalReg src = True
+      | otherwise = ((==) `on` gcFlagOfReg) dest src
 
     allPhys (dest, src) = ((&&) `on` isPhysicalReg) dest src
 
