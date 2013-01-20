@@ -104,7 +104,10 @@ buildIGraph fg = go
         then do
           nDest <- addNode dest
           nSrc <- addNode src
-          modify (mMoveGraph (G.insEdge (nSrc, nDest, ())))
+          g <- gets liveGraph
+          if nSrc `notElem` G.pre g nDest
+            then modify (mMoveGraph (G.insEdge (nSrc, nDest, ())))
+            else return ()
         else
           return ()
 

@@ -3,70 +3,121 @@
 
 export "C" main;
 
-i64 frameBottom = 0;
+i64 g_frameBottom = 0;
 
 main() {
-    gcptr a;
+    gcptr a, b;
 
-    i64[frameBottom] = asm("%rbp");
+    i64[g_frameBottom] = asm("%rbp");
 
-    call "C" puts("at main, calling stacktrace...");
-    call stackTrace(i64[frameBottom]);
+    call "C" puts("at main, calling gcStacktrace...");
+    call CaLang_prepareCollection(gcStackTrace, 0);
 
-    a = call mkInt(1);
+    a = call mkInt(0);
+    b = call mkInt(0);
     call printObject(a);
+    call printObject(b);
 
-    call "C" puts("at main again, calling stacktrace...");
-    call stackTrace(i64[frameBottom]);
+    call "C" puts("at main again, calling gcStacktrace...");
+    call CaLang_prepareCollection(gcStackTrace, 0);
 
     call printObject(a);
+    call printObject(b);
 
     call "C" free(a);
+    call "C" free(b);
 
     return 0;
 }
 
-stackTrace(i64 to) {
-    i64 from, i;
+mutateLoc(i64 loc) {
+    i64 tmp, val;
 
-    from = asm("%rbp");
+    val = i64[i64[loc] + 8];
+    tmp = call "C" malloc(16);
+    call "C" free(i64[loc]);
+    i64[loc] = tmp;
+    i64[tmp    ] = vtableOfInt;
+    i64[tmp + 8] = val + 1;
+}
+
+/* Well, I'd better write this in C... */
+gcStackTrace(i64 rootFinder, i64 unused) {
+    i64 framePtr, gcMap, frameBottom, i;
+
     i = 0;
-    while (1) {
-        i64 gcMap;
+    framePtr = i64[rootFinder + 40];
+    frameBottom = i64[g_frameBottom];
 
-        gcMap = call lookupGcMap(i64[from + 8]);
+    while (1) {
+        gcMap = call lookupGcMap(i64[framePtr + 8]);
         call "C/vararg" printf("#%ld: @%p|%p, gcmap=%p\n",
-                               i, from, to, gcMap);
+                               i, framePtr, frameBottom, gcMap);
         if (gcMap) {
             //call pprGcMap(gcMap);
-            if (i64[gcMap + 64] == 1) {
-                i64 someOffset, someLoc, somePtr;
+            i64 regBitmap, nPtrs;
 
-                someOffset = i64[gcMap + 72];
-                /* Since it's stored in the previous frame, we need to
-                   get the prev frame ptr as the base */
-                someLoc = i64[from] + someOffset;
-                somePtr = i64[someLoc];
-                call "C/vararg" printf(
-                  "found a ptr at fp[%ld] (@%p, = %p), lets tweak it a bit\n",
-                  someOffset, someLoc, somePtr);
+            regBitmap = i64[gcMap + 48];
+            if (regBitmap) {
+                call "C/vararg" printf("has some escaped regs (bitmap=%lx)\n",
+                                       regBitmap);
+                i64 regIter;
 
-                /* Replace with another int :P */
-                i64 tmp;
-                tmp = call "C" malloc(16);
-                call "C" free(somePtr);
-                somePtr = tmp;
-                i64[somePtr    ] = vtableOfInt;
-                i64[somePtr + 8] = 54321;
-                i64[someLoc] = somePtr;
+                regIter = 0;
+                while (regIter < 5) {
+                    if (regBitmap & (1 << regIter)) {
+                        i64 loc;
+                        loc = i64[rootFinder + (regIter << 3)];
+                        call "C/vararg" printf("one of them is #%ld: %p.\n"
+                                               "Lets tweak it a bit.\n",
+                                               regIter, i64[loc]);
+                        call mutateLoc(loc);
+                    }
+                    regIter = regIter + 1;
+                }
+            }
+
+            nPtrs = i64[gcMap + 64];
+            if (nPtrs) {
+                call "C/vararg" printf("has %ld direct pointers\n", nPtrs);
+                i64 stkIter;
+
+                stkIter = 0;
+                while (stkIter < nPtrs) {
+                    i64 offset, stkLoc;
+
+                    offset = i64[gcMap + 72 + (stkIter << 3)];
+                    stkLoc = i64[framePtr] + offset;
+                    call "C/vararg" printf("one of them is #%ld: %p.\n"
+                                           "Lets tweak it a bit.\n",
+                                           stkIter, i64[stkLoc]);
+                    call mutateLoc(stkLoc);
+                    stkIter = stkIter + 1;
+                }
+            }
+
+            i64 prologSaveIter;
+            prologSaveIter = 0;
+            while (prologSaveIter < 5) {
+                i64 saveOffset, saveLoc;
+                
+                saveOffset = i64[gcMap + 8 + (prologSaveIter << 3)];
+                if (saveOffset) {
+                    call "C" puts("func saves a callee-save reg in the prolog"
+                                  ", we put it into the rootFinder.");
+                    saveLoc = i64[framePtr] + saveOffset;
+                    i64[rootFinder + (prologSaveIter << 3)] = saveLoc;
+                }
+
+                prologSaveIter = prologSaveIter + 1;
             }
         }
 
-        if (from >= to) {
+        if (framePtr >= frameBottom) {
             break;
         }
         else {
-            from = i64[from];
+            framePtr = i64[framePtr];
             i = i + 1;
         }
     }
@@ -105,7 +156,7 @@ mkInt(i64 iVal) {
 
 alloc(i64 size) {
     call "C" puts("at alloc/mkInt/main, calling stacktrace...");
-    call stackTrace(i64[frameBottom]);
+    call CaLang_prepareCollection(gcStackTrace, 0);
     call "C/tail" malloc(size);
 }
 

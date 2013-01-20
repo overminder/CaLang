@@ -83,6 +83,7 @@ munchStmt s = case s of
           RLe -> munchRel bop e1 e2 s_true s_false
           RGt -> munchRel bop e1 e2 s_true s_false
           RGe -> munchRel bop e1 e2 s_true s_false
+          BAnd -> munchRel bop e1 e2 s_true s_false
           _ -> munchStmt (SIf (EBinary RNe e (EVar (mkInt 0))) s_true s_false)
       _ -> munchStmt (SIf (EBinary RNe e (EVar (mkInt 0))) s_true s_false)
   SWhile e s -> 

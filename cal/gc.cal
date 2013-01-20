@@ -4,7 +4,7 @@
 #include "stdlib.cal"
 
 import CaLang_GcMapRoot;
-import CaLang_PrepareCollection;
+import CaLang_prepareCollection;
 
 lookupGcMap(i64 retAddr) {
     i64 end, iter;
@@ -27,14 +27,27 @@ lookupGcMap(i64 retAddr) {
 }
 
 pprGcMap(i64 gcMap) {
-    i64 i;
+    i64 i, nPtrs;
 
     i = 0;
     call "C/vararg" printf(".GcMap @%p {\n", gcMap);
-    while (i < 72) {
+    while (i < 64) {
         call "C/vararg" printf("  i64[%ld] = %p\n", i, i64[gcMap + i]);
         i = i + 8;
     }
+
+    nPtrs = i64[gcMap + 64];
+    if (nPtrs) {
+        i64 ptrIter;
+        ptrIter = 0;
+        call "C/vararg" printf("  ptrs=[");
+        while (ptrIter < nPtrs) {
+            call "C/vararg" printf("%ld, ", i64[gcMap + 72 + (ptrIter << 3)]);
+            ptrIter = ptrIter + 1;
+        }
+        call "C/vararg" printf("]\n");
+    }
+
     call "C/vararg" printf("}\n");
 }
 

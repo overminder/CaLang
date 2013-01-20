@@ -13,7 +13,7 @@ import qualified Data.Set as Set
 import Data.Foldable
 import Data.Traversable
 import Language.Preprocessor.Cpphs
-import Prelude hiding (mapM, mapM_, sequence, sequence_, foldr, concat)
+import Prelude hiding (mapM, mapM_, sequence, sequence_, foldr, concat, elem)
 import System.IO
 import System.Environment
 import Text.Dot
@@ -354,13 +354,13 @@ pipelines = [ do src <- gets tr_input
                  -- RegAlloc: recklessly coalesce reg-reg moves
                  -- XXX Disable for now
                  (coalLvGs, coalInterfGs) <- flip evalStateT fuel $ do
-                   return (lvGraphs, interfGs)
+                   --return (lvGraphs, interfGs)
                    coalGraphPairs <- zipWithM Ral.coalesce lvGraphs interfGs
                    return (unzip coalGraphPairs)
 
                  -- RegAlloc: select physical reg for each virtual reg
                  clobs <- gets tr_rnClobRegs
-                 let usableRegs = generalRegs List.\\ clobs
+                 let usableRegs = reverse (generalRegs List.\\ clobs)
                      ralMaps = map (Ral.allocPhysReg usableRegs) coalInterfGs
                      ralGs = zipWith3 Ral.assignPhysReg ralMaps
                                                         coalInterfGs
@@ -426,7 +426,9 @@ genDataFromGcMaps gcMaps = do
                             in map (\r -> fromIntegral
                                      (Map.findWithDefault 0 r saveMap))
                                    Arch.kCalleeSaves
-      mkEscapeBitmap escapes = 157
+      mkEscapeBitmap escapes
+        = let escapeBits = map (`elem` escapes) Arch.kCalleeSaves
+           in fromIntegral (mkBitmap (reverse escapeBits))
 
   gcMapDatas <- mapM mkConcreteGcMap (concat gcMaps)
   let rootMap = F.LiteralData (F.i64, OpImm (NamedLabel rootName))

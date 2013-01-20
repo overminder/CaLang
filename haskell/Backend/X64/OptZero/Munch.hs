@@ -126,9 +126,13 @@ munchInstr tac = case tac of
       emit (movq (OpReg r) (OpReg rax))
       emit (RET True)
 
-  Tac.JIF cond (lhs, rhs) trueLabel _ -> do
-    emit (CMP rhs lhs)
-    emit (JXX cond trueLabel)
+  Tac.JIF condOrTest (lhs, rhs) trueLabel _
+    | isCondOp condOrTest -> do
+        emit (CMP rhs lhs)
+        emit (JXX condOrTest trueLabel)
+    | condOrTest == BAnd -> do
+        emit (TEST rhs lhs)
+        emit (JXX RNe trueLabel)
 
   Tac.JMP op -> do
     emit (JMP (OpImm op) Nothing)

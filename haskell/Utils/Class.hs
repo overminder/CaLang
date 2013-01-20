@@ -4,6 +4,7 @@ module Utils.Class (
   Ppr(..),
   pass,
   mapRM,
+  mkBitmap,
 ) where
 
 import Control.Applicative
@@ -31,3 +32,12 @@ instance (Monad m) => Applicative (RightT m) where
 
 mapRM :: (Monad m, Traversable t) => (a -> m b) -> t a -> m (t b)
 mapRM f t = runRightT (traverse (RightT . f) t)
+
+mkBitmap :: [Bool] -> Int
+mkBitmap bs = go bs 0
+  where
+    go bs curr = case bs of
+      x:xs -> go xs (boolToBit x + curr * 2)
+      [] -> curr
+
+    boolToBit x = if x then 1 else 0

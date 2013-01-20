@@ -115,7 +115,7 @@ findCoalescable g = case coalescables of
     coalescables = filters [ not . isForbidden
                            , not . doesInterf
                            , not . allPhys
-                           , gcFlagMatches
+                           --, gcFlagMatches
                            ] moves
 
     v2r = vertex2Reg g
