@@ -43,8 +43,8 @@ coalesce fGraph iGraph = go fGraph iGraph []
         else case findCoalescable iGraph of
           Nothing -> applyKill fGraph iGraph killWiths
           Just (dest, src) -> do
-            trace ("coalesce " ++ show (pprRegPair (dest, src)) ++
-                   " at fuel = " ++ show fuel) $ return ()
+            --trace ("coalesce " ++ show (pprRegPair (dest, src)) ++
+            --       " at fuel = " ++ show fuel) $ return ()
             let (kill, with) = if isPhysicalReg dest then (src, dest)
                                else if isPhysicalReg src then (dest, src)
                                else (dest, src)

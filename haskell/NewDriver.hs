@@ -32,6 +32,7 @@ import Backend.Operand
 import qualified Backend.HOST_ARCH.Instr as Arch
 import qualified Backend.HOST_ARCH.OptZero.Munch as Arch
 import qualified Backend.HOST_ARCH.OptZero.Frame as Arch
+import qualified Backend.HOST_ARCH.OptZero.Peephole as Arch
 import qualified Backend.RegAlloc.Liveness as Ral
 --import qualified Backend.RegAlloc.Interference as Ral
 import qualified Backend.RegAlloc.IGraph as Ral
@@ -373,6 +374,7 @@ pipelines = [ do src <- gets tr_input
                                            (repeat clobs)
                                            usedRegs
                                            (repeat Arch.genPlatDepCode))
+                 let optPlatGs = map Arch.peepholeOpt platGs
 
                  -- Backend/GC: format gcmap as static data
                  gcMapDatas <- genDataFromGcMaps gcMaps
@@ -384,7 +386,7 @@ pipelines = [ do src <- gets tr_input
                    tr_ralCoalLvGraphs = coalLvGs,
                    tr_ralCoalInterfGraphs = coalInterfGs,
                    tr_ralMaps = ralMaps,
-                   tr_platGraphs = platGs,
+                   tr_platGraphs = optPlatGs,
                    tr_gcMaps = gcMaps,
                    tr_gcMapDatas = gcMapDatas
                  }
